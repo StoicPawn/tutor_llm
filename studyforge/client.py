@@ -36,8 +36,13 @@ class TutorClient:
         return response.json() if 'application/json' in content_type else response.content
 
     def health(self) -> dict:
-        # Health is intentionally public, so a client can discover server capabilities before auth.
         return self._request('GET', '/health')
+
+    def identity(self) -> dict:
+        return self._request('GET','/device/me')
+
+    def workspace_manifest(self, workspace_id:int) -> dict:
+        return self._request('GET',f'/sync/workspaces/{workspace_id}/manifest')
 
     def workspaces(self) -> list[dict]:
         return self._request('GET', '/workspaces')
