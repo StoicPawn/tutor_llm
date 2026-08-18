@@ -88,8 +88,22 @@ def _validate_layers(layers:list[dict])->list[dict]:
     return out
 
 
-def create_notebook(workspace_id:int,title:str,description:str='',*,document_id:int|None=None,page:int|None=None,concept:str|None=None)->int:
-    _ensure(); title=title.strip()
+def create_notebook(workspace_id:int,title:str,description:str='',document_id:int|None=None,page:int|None=None,concept:str|None=None)->int:
+    """Create a notebook.
+
+    The positional compatibility branch keeps API v0.8-v0.11 clients working; new code should
+    pass description/document_id/page/concept by keyword.
+    """
+    # Older api_learning called (workspace_id,title,linked_document_id,linked_page,concept).
+    if (description is None or isinstance(description,int)) and (isinstance(page,str) or page is None) and concept is None:
+        legacy_document_id=description
+        legacy_page=document_id
+        legacy_concept=page
+        description=''
+        document_id=legacy_document_id
+        page=legacy_page
+        concept=legacy_concept
+    _ensure(); title=title.strip(); description=(description or '')
     if not title: raise ValueError('Titolo quaderno obbligatorio.')
     if document_id is not None and not document_belongs_to_workspace(document_id,workspace_id): raise ValueError('Documento fuori workspace.')
     now=_now()
@@ -126,8 +140,9 @@ def get_notebook(workspace_id:int,notebook_id:int)->dict|None:
     out=dict(n); out['pages']=[_decode_page(p) for p in pages]; return out
 
 
-def add_page(workspace_id:int,notebook_id:int,*,title:str='',background:str='blank',width:float=1024,height:float=1365)->dict:
-    _ensure(); background=background.strip().lower()
+def add_page(workspace_id:int,notebook_id:int,background:str='blank',title:str='',layers:list[dict]|None=None,width:float=1024,height:float=1365)->dict:
+    """Add a page; accepts the positional shape used by the REST endpoint."""
+    _ensure(); background=background.strip().lower(); layers=_validate_layers(layers or [])
     if background not in ALLOWED_BACKGROUNDS: raise ValueError('Sfondo non supportato.')
     now=_now()
     with connect() as con:
@@ -135,7 +150,7 @@ def add_page(workspace_id:int,notebook_id:int,*,title:str='',background:str='bla
         if not n: raise ValueError('Quaderno non trovato.')
         pos=int(con.execute('SELECT COALESCE(MAX(position),0)+1 n FROM notebook_pages WHERE notebook_id=?',(notebook_id,)).fetchone()['n'])
         cur=con.execute('''INSERT INTO notebook_pages(notebook_id,position,title,width,height,background,layers_json,created_at,updated_at)
-                           VALUES(?,?,?,?,?,?,?,?,?)''',(notebook_id,pos,(title or f'Pagina {pos}')[:300],float(width),float(height),background,'[]',now,now))
+                           VALUES(?,?,?,?,?,?,?,?,?)''',(notebook_id,pos,(title or f'Pagina {pos}')[:300],float(width),float(height),background,json.dumps(layers,ensure_ascii=False),now,now))
         con.execute('UPDATE study_notebooks SET updated_at=? WHERE id=?',(now,notebook_id))
         row=con.execute('SELECT * FROM notebook_pages WHERE id=?',(cur.lastrowid,)).fetchone()
     data=_decode_page(row)
@@ -162,6 +177,18 @@ def save_page(workspace_id:int,notebook_id:int,page_id:int,*,layers:list[dict],t
     from .offline_sync import sync_server_upsert
     sync_server_upsert(workspace_id,'notebook_page',page_id,_page_payload(data,notebook_id))
     return data
+
+
+def update_page(workspace_id:int,notebook_id:int,page_id:int,*,background:str|None=None,title:str|None=None,layers:list[dict]|None=None)->dict:
+    """Partial-update wrapper expected by api_learning."""
+    _ensure()
+    if layers is None:
+        with connect() as con:
+            row=con.execute('''SELECT p.* FROM notebook_pages p JOIN study_notebooks n ON n.id=p.notebook_id
+                               WHERE p.id=? AND p.notebook_id=? AND n.workspace_id=?''',(page_id,notebook_id,workspace_id)).fetchone()
+        if not row: raise ValueError('Pagina quaderno non trovata.')
+        layers=_decode_page(row)['layers']
+    return save_page(workspace_id,notebook_id,page_id,layers=layers,title=title,background=background)
 
 
 def delete_notebook(workspace_id:int,notebook_id:int):
