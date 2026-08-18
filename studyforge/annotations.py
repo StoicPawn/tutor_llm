@@ -32,6 +32,23 @@ def _ensure():
     with connect() as con: con.executescript(SCHEMA)
 
 
+def _decode(row)->dict:
+    d=dict(row); d['bbox']=json.loads(d.pop('bbox_json')) if d.get('bbox_json') else None; d['payload']=json.loads(d.pop('payload_json') or '{}'); return d
+
+
+def _sync_payload(data:dict)->dict:
+    return {
+        'document_id':data.get('document_id'),
+        'page':data.get('page'),
+        'kind':data.get('kind'),
+        'bbox':data.get('bbox'),
+        'text':data.get('text',''),
+        'payload':data.get('payload') or {},
+        'created_at':data.get('created_at'),
+        'updated_at':data.get('updated_at'),
+    }
+
+
 def create_annotation(workspace_id:int,document_id:int,page:int,kind:str,*,bbox:list[float]|None=None,text:str='',payload:dict|None=None)->int:
     _ensure()
     kind=kind.strip().lower()
@@ -52,7 +69,12 @@ def create_annotation(workspace_id:int,document_id:int,page:int,kind:str,*,bbox:
         cur=con.execute('''INSERT INTO document_annotations(workspace_id,document_id,page,kind,bbox_json,text,payload_json,created_at,updated_at)
                            VALUES(?,?,?,?,?,?,?,?,?)''',
                         (workspace_id,document_id,page,kind,json.dumps(bbox) if bbox is not None else None,text[:12000],json.dumps(payload,ensure_ascii=False),now,now))
-        return int(cur.lastrowid)
+        annotation_id=int(cur.lastrowid)
+        row=con.execute('SELECT * FROM document_annotations WHERE id=? AND workspace_id=?',(annotation_id,workspace_id)).fetchone()
+    data=_decode(row)
+    from .offline_sync import sync_server_upsert
+    sync_server_upsert(workspace_id,'annotation',annotation_id,_sync_payload(data))
+    return annotation_id
 
 
 def list_annotations(workspace_id:int,document_id:int|None=None,page:int|None=None,limit:int=500)->list[dict]:
@@ -62,10 +84,7 @@ def list_annotations(workspace_id:int,document_id:int|None=None,page:int|None=No
     params.append(max(1,min(int(limit),2000)))
     with connect() as con:
         rows=con.execute('SELECT * FROM document_annotations WHERE '+' AND '.join(where)+' ORDER BY page,id LIMIT ?',params).fetchall()
-    out=[]
-    for r in rows:
-        d=dict(r); d['bbox']=json.loads(d.pop('bbox_json')) if d.get('bbox_json') else None; d['payload']=json.loads(d.pop('payload_json') or '{}'); out.append(d)
-    return out
+    return [_decode(r) for r in rows]
 
 
 def update_annotation(workspace_id:int,annotation_id:int,*,text:str|None=None,bbox:list[float]|None=None,payload:dict|None=None)->dict:
@@ -80,9 +99,19 @@ def update_annotation(workspace_id:int,annotation_id:int,*,text:str|None=None,bb
         cur=con.execute('UPDATE document_annotations SET '+','.join(fields)+' WHERE id=? AND workspace_id=?',values)
         if cur.rowcount!=1: raise ValueError('Annotazione non trovata.')
         row=con.execute('SELECT * FROM document_annotations WHERE id=? AND workspace_id=?',(annotation_id,workspace_id)).fetchone()
-    d=dict(row); d['bbox']=json.loads(d.pop('bbox_json')) if d.get('bbox_json') else None; d['payload']=json.loads(d.pop('payload_json') or '{}'); return d
+    data=_decode(row)
+    from .offline_sync import sync_server_upsert
+    sync_server_upsert(workspace_id,'annotation',annotation_id,_sync_payload(data))
+    return data
 
 
 def delete_annotation(workspace_id:int,annotation_id:int):
     _ensure()
-    with connect() as con: con.execute('DELETE FROM document_annotations WHERE id=? AND workspace_id=?',(annotation_id,workspace_id))
+    with connect() as con:
+        row=con.execute('SELECT * FROM document_annotations WHERE id=? AND workspace_id=?',(annotation_id,workspace_id)).fetchone()
+        if not row: return False
+        data=_decode(row)
+        con.execute('DELETE FROM document_annotations WHERE id=? AND workspace_id=?',(annotation_id,workspace_id))
+    from .offline_sync import sync_server_delete
+    sync_server_delete(workspace_id,'annotation',annotation_id,_sync_payload(data))
+    return True
