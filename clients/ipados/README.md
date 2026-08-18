@@ -25,27 +25,64 @@ Se usi un iPad fisico, imposta il tuo Team di firma in Xcode.
 - configurazione URL server
 - token dispositivo salvato in Keychain
 - health/identity validation
-- lista workspace
-- lista documenti
+- lista workspace e documenti
 - viewer PDF nativo con PDFKit
 - split view adatta a iPad
 - Tutor contestuale al documento/pagina corrente
 - canvas PencilKit
-- base networking compatibile con Tutor LLM API v0.11+
+- cache nativa SwiftData per stato sync e artefatti personali
+- download dei PDF in Application Support per lettura offline
+- dirty queue per modifiche create senza rete
+- pull/push del change feed Tutor LLM v0.11+
+- rilevazione conflitti senza last-write-wins distruttivo
+- cursor e manifest persistenti per workspace
+- indicatori UI per PDF offline, sincronizzazione e conflitti
 
-## Stato attuale
+## Modello offline
 
-Questa è la prima tranche del client nativo. PDF e Tutor usano già il server reale. Il canvas PencilKit è funzionante localmente ma il suo salvataggio deve ancora essere collegato alle `notebook_page` sincronizzabili già supportate dal backend.
+Il server resta source of truth per inferenza, RAG, curriculum, mastery e knowledge graph. Il client può però conservare localmente PDF e artefatti personali.
 
-Il prossimo livello client comprende:
+```text
+Tutor Server
+    ⇅ sync
+SwiftData cache iPad
+    ├── cursor / manifest
+    ├── note / annotation / notebook_page
+    ├── dirty queue
+    ├── conflitti
+    └── riferimenti ai PDF offline
 
-1. cache SQLite/SwiftData locale equivalente a `studyforge/client_cache.py`;
-2. download `Disponibile offline` dei PDF;
-3. pull/push automatico degli envelope di note, annotazioni e notebook;
-4. persistenza PencilKit -> layer ink del quaderno;
-5. selezione PDF nativa -> `/documents/render-selection` e azioni Spiegami/Perché/Esempio/Esercizio;
-6. gestione conflitti con UI esplicita;
-7. pairing device user-friendly senza copiare manualmente token.
+Application Support
+    └── copie PDF disponibili offline
+
+Keychain
+    └── token dispositivo
+```
+
+Il ciclo client è conservativo:
+
+```text
+pull → applica modifiche remote non dirty → push dirty queue → conserva conflitti → aggiorna cursor
+```
+
+Se il server non è raggiungibile, i PDF già scaricati restano leggibili e le modifiche personali possono restare accodate fino alla connessione successiva.
+
+## Stato PencilKit
+
+Il canvas PencilKit è già nativo e funzionante. Il backend supporta `notebook_page` con layer ink vettoriali; resta da completare la conversione bidirezionale `PKDrawing ↔ layer ink Tutor LLM` e la scelta/creazione del quaderno server a cui associare il foglio corrente.
+
+## Selezione PDF
+
+Il prossimo passaggio del reader è collegare le selezioni native PDFKit al contratto già disponibile sul server:
+
+- `/documents/render-selection`
+- `/study/context-action`
+
+per azioni immediate come **Spiegami**, **Perché?**, **Approfondisci**, **Esempio**, **Esercizio** e **Prerequisiti**.
+
+## CI
+
+`.github/workflows/ipados.yml` gira su macOS, installa XcodeGen, genera il progetto e prova una build per iOS Simulator con code signing disabilitato.
 
 ## Principio architetturale
 
