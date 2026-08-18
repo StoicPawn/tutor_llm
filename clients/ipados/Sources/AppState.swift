@@ -153,7 +153,7 @@ final class AppState: ObservableObject {
             localState.lastSyncAt = Date()
             lastSyncAt = localState.lastSyncAt
             conflictCount = cache.dirtyEntities(workspaceID: workspace.id).filter(\.conflict).count
-            try localState.modelContext?.save()
+            try cache.save()
         } catch {
             // Offline is expected: cached PDFs and dirty artifacts remain usable.
             errorMessage = error.localizedDescription
