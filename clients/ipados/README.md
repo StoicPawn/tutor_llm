@@ -37,6 +37,8 @@ Se usi un iPad fisico, imposta il tuo Team di firma in Xcode.
 - rilevazione conflitti senza last-write-wins distruttivo
 - cursor e manifest persistenti per workspace
 - indicatori UI per PDF offline, sincronizzazione e conflitti
+- creazione/riuso automatico del quaderno collegato al documento
+- salvataggio `PKDrawing` nella pagina quaderno sincronizzabile
 
 ## Modello offline
 
@@ -69,7 +71,9 @@ Se il server non è raggiungibile, i PDF già scaricati restano leggibili e le m
 
 ## Stato PencilKit
 
-Il canvas PencilKit è già nativo e funzionante. Il backend supporta `notebook_page` con layer ink vettoriali; resta da completare la conversione bidirezionale `PKDrawing ↔ layer ink Tutor LLM` e la scelta/creazione del quaderno server a cui associare il foglio corrente.
+Il canvas PencilKit è collegato a una `notebook_page` reale. Il primo salvataggio online crea o riusa un quaderno associato al documento e acquisisce l'envelope di sync; i salvataggi successivi passano dalla dirty queue. Per ora `PKDrawing` viene conservato come payload nativo Base64 dentro un layer `ink`, insieme al riferimento alla pagina del libro.
+
+Resta da aggiungere la conversione bidirezionale completa `PKDrawing ↔ stroke vettoriali Tutor LLM`, necessaria per rendere lo stesso disegno modificabile anche da client non Apple.
 
 ## Selezione PDF
 
