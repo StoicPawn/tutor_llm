@@ -153,6 +153,13 @@ def get_document_page(workspace_id:int,document_id:int,page:int):
     data=dict(row); data['blocks']=json.loads(data.pop('blocks_json')); return data
 
 
+def get_document(workspace_id:int,document_id:int):
+    with connect() as con:
+        row=con.execute('SELECT id,workspace_id,name,path,created_at FROM documents WHERE id=? AND workspace_id=?',
+                        (document_id,workspace_id)).fetchone()
+    return dict(row) if row else None
+
+
 def add_chunks(document_id:int,chunks:list[dict],embeddings:list[list[float]]):
     with connect() as con:
         con.executemany('INSERT INTO chunks(document_id,page,chunk_index,text,embedding) VALUES(?,?,?,?,?)',
