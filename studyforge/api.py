@@ -1,10 +1,11 @@
 from __future__ import annotations
 import os, tempfile
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from .db import list_documents, save_lesson
 from .pipeline import ingest_file
 from .teacher import answer_question, build_lesson, summarize, deepen, build_exercises, build_reasoning
+from .assessment import grade_answer
 from .workspaces import create_workspace, list_workspaces, get_workspace, ensure_default_workspace
 from .sessions import start_session, update_session, get_session, end_session
 from .notes import create_note, list_notes
@@ -24,6 +25,14 @@ class TutorRequest(BaseModel):
     document_ids: list[int] | None = None
     epistemic_mode: str = "Grounded"
     lesson_mode: str = "Approfondita"
+
+
+class AssessmentIn(BaseModel):
+    workspace_id: int
+    topic: str
+    question: str
+    answer: str
+    document_ids: list[int] | None = None
 
 
 class SessionIn(BaseModel):
@@ -91,8 +100,10 @@ async def upload_document(workspace_id: int, file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     finally:
-        try: os.unlink(path)
-        except OSError: pass
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @app.post("/tutor/ask")
@@ -136,6 +147,14 @@ def exercises(payload: TutorRequest):
 def reasoning(payload: TutorRequest):
     content, sources = build_reasoning(payload.workspace_id, payload.topic, payload.document_ids, payload.epistemic_mode)
     return {"content": content, "sources": sources}
+
+
+@app.post("/assessment/grade")
+def assessment(payload: AssessmentIn):
+    try:
+        return grade_answer(payload.workspace_id, payload.topic, payload.question, payload.answer, payload.document_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/sessions")
