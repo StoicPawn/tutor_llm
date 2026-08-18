@@ -2,7 +2,7 @@ from __future__ import annotations
 import json, re
 from datetime import datetime, timezone
 from .db import connect, iter_chunks
-from .ollama_client import chat
+from .inference import chat
 from .student import mastery_for
 
 SCHEMA='''
