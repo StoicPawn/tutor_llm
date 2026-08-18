@@ -8,6 +8,7 @@ struct StudioView: View {
     @State private var tutorAnswer = ""
     @State private var isAsking = false
     @State private var drawingData = Data()
+    @State private var isSavingDrawing = false
     @State private var rightTab = 0
 
     var body: some View {
@@ -27,7 +28,10 @@ struct StudioView: View {
             }
             .frame(minWidth: 360, idealWidth: 430)
         }
-        .task(id: state.selectedDocument?.id) { await loadPDF() }
+        .task(id: state.selectedDocument?.id) {
+            drawingData = Data()
+            await loadPDF()
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if state.conflictCount > 0 {
@@ -114,6 +118,17 @@ struct StudioView: View {
                 Spacer()
                 Text("PencilKit").font(.caption).foregroundStyle(.secondary)
                 Button("Pulisci") { drawingData = Data() }
+                Button {
+                    Task {
+                        isSavingDrawing = true
+                        await state.savePencilDrawing(drawingData, readingPage: currentPage)
+                        isSavingDrawing = false
+                    }
+                } label: {
+                    if isSavingDrawing { ProgressView() }
+                    else { Label("Salva", systemImage: "square.and.arrow.down") }
+                }
+                .disabled(state.selectedDocument == nil || isSavingDrawing)
             }
             .padding()
             Divider()
@@ -128,7 +143,6 @@ struct StudioView: View {
             let url = try await state.selectedPDFURL()
             pdfData = try Data(contentsOf: url, options: .mappedIfSafe)
         } catch {
-            // If the document is not cached and the network is unavailable, the reader cannot open it.
             state.errorMessage = error.localizedDescription
         }
     }
