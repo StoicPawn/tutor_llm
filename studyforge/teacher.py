@@ -51,9 +51,11 @@ Struttura in Markdown. Chiudi con: Punti chiave, Verifica rapida, Fonti usate.''
 def build_quiz(workspace_id: int, topic: str, document_ids=None, n: int = 8, epistemic_mode: str = "Grounded") -> str:
     _, blocks, _ = _context(workspace_id, topic, document_ids, min(settings.top_k, 10))
     policy = EPISTEMIC_GUIDES.get(epistemic_mode, EPISTEMIC_GUIDES["Grounded"])
-    return chat([{"role": "user", "content": f'''Crea un quiz di {n} domande in italiano. {policy}
+    material = "\n\n".join(blocks)
+    prompt = f'''Crea un quiz di {n} domande in italiano. {policy}
 Mescola risposta aperta, scelta multipla e una domanda di ragionamento. Soluzioni in fondo, separate, con breve spiegazione e [FONTE N] quando deriva dal materiale.
-Tema: {topic}\nMATERIALE:\n{'\n\n'.join(blocks)}'''}], temperature=.08)
+Tema: {topic}\nMATERIALE:\n{material}'''
+    return chat([{"role": "user", "content": prompt}], temperature=.08)
 
 
 def answer_question(workspace_id: int, question: str, document_ids=None, epistemic_mode: str = "Grounded") -> tuple[str, list[dict]]:
@@ -69,20 +71,24 @@ def answer_question(workspace_id: int, question: str, document_ids=None, epistem
 def summarize(workspace_id: int, request: str, document_ids=None, epistemic_mode: str = "Grounded") -> tuple[str, list[dict]]:
     _, blocks, compact = _context(workspace_id, request, document_ids, min(settings.top_k + 4, 16))
     policy = EPISTEMIC_GUIDES.get(epistemic_mode, EPISTEMIC_GUIDES["Grounded"])
-    content = chat([{"role": "user", "content": f'''Produci un riassunto didattico in italiano per: {request}.
+    material = "\n\n".join(blocks)
+    prompt = f'''Produci un riassunto didattico in italiano per: {request}.
 {policy}
 Distingui concetti centrali, relazioni, formule/definizioni se presenti, errori da evitare e 5 punti di richiamo attivo. Cita [FONTE N].
-MATERIALE:\n{'\n\n'.join(blocks)}'''}], temperature=.07)
+MATERIALE:\n{material}'''
+    content = chat([{"role": "user", "content": prompt}], temperature=.07)
     return content, compact
 
 
 def deepen(workspace_id: int, topic: str, document_ids=None, epistemic_mode: str = "Tutor") -> tuple[str, list[dict]]:
     _, blocks, compact = _context(workspace_id, topic, document_ids, min(settings.top_k + 4, 16))
     policy = EPISTEMIC_GUIDES.get(epistemic_mode, EPISTEMIC_GUIDES["Tutor"])
-    content = chat([{"role": "user", "content": f'''Approfondisci il tema "{topic}" fino al livello massimo sostenibile.
+    material = "\n\n".join(blocks)
+    prompt = f'''Approfondisci il tema "{topic}" fino al livello massimo sostenibile.
 {policy}
 Costruisci una catena: intuizione → formalizzazione → prerequisiti → collegamenti → casi limite → almeno due esempi → domande aperte per verificare comprensione. Cita [FONTE N].
-MATERIALE:\n{'\n\n'.join(blocks)}'''}], temperature=.1)
+MATERIALE:\n{material}'''
+    content = chat([{"role": "user", "content": prompt}], temperature=.1)
     return content, compact
 
 
@@ -90,18 +96,22 @@ def build_exercises(workspace_id: int, topic: str, document_ids=None, difficulty
     _, blocks, compact = _context(workspace_id, topic, document_ids, min(settings.top_k + 2, 12))
     mastery = mastery_for(workspace_id, topic)
     policy = EPISTEMIC_GUIDES.get(epistemic_mode, EPISTEMIC_GUIDES["Tutor"])
-    content = chat([{"role": "user", "content": f'''Genera {n} esercizi sul tema "{topic}". Difficoltà richiesta: {difficulty}; mastery stimata: {mastery:.0%}.
+    material = "\n\n".join(blocks)
+    prompt = f'''Genera {n} esercizi sul tema "{topic}". Difficoltà richiesta: {difficulty}; mastery stimata: {mastery:.0%}.
 {policy}
 Gli esercizi devono crescere da comprensione a trasferimento e ragionamento. Non mostrare subito le soluzioni: crea prima la sezione ESERCIZI, poi una sezione SOLUZIONI separata e facilmente occultabile. Per ogni soluzione spiega il ragionamento e cita [FONTE N] quando pertinente.
-MATERIALE:\n{'\n\n'.join(blocks)}'''}], temperature=.12)
+MATERIALE:\n{material}'''
+    content = chat([{"role": "user", "content": prompt}], temperature=.12)
     return content, compact
 
 
 def build_reasoning(workspace_id: int, topic: str, document_ids=None, epistemic_mode: str = "Tutor") -> tuple[str, list[dict]]:
     _, blocks, compact = _context(workspace_id, topic, document_ids, min(settings.top_k + 3, 14))
     policy = EPISTEMIC_GUIDES.get(epistemic_mode, EPISTEMIC_GUIDES["Tutor"])
-    content = chat([{"role": "user", "content": f'''Crea una sessione socratica di ragionamento su "{topic}".
+    material = "\n\n".join(blocks)
+    prompt = f'''Crea una sessione socratica di ragionamento su "{topic}".
 {policy}
 Proponi 4 problemi concettuali che richiedano collegamenti tra idee, non semplice memoria. Per ciascuno fornisci: domanda, indizio 1, indizio 2, soluzione ragionata e cosa diagnostica sull'apprendimento. Cita [FONTE N].
-MATERIALE:\n{'\n\n'.join(blocks)}'''}], temperature=.1)
+MATERIALE:\n{material}'''
+    content = chat([{"role": "user", "content": prompt}], temperature=.1)
     return content, compact
