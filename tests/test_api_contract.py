@@ -1,0 +1,18 @@
+import unittest
+from studyforge.api import app
+
+class ApiContractTests(unittest.TestCase):
+    def test_learning_routes_are_exposed(self):
+        paths={r.path for r in app.routes}
+        expected={
+            '/documents/selection/map',
+            '/documents/structure/rebuild',
+            '/flashcards/generate',
+            '/workspaces/{workspace_id}/review-queue',
+            '/workspaces/{workspace_id}/next-activity',
+            '/workspaces/{workspace_id}/documents/{document_id}/pages/{page}',
+            '/exercises/sessions/{session_id}/answer',
+        }
+        self.assertTrue(expected.issubset(paths), expected-paths)
+
+if __name__=='__main__': unittest.main()
