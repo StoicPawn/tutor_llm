@@ -2,6 +2,8 @@ from __future__ import annotations
 import os, tempfile
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
+from .config import settings
+from .inference import health as inference_health
 from .db import list_documents, save_lesson, get_document_page
 from .pipeline import ingest_file
 from .teacher import answer_question, build_lesson, summarize, deepen, build_exercises, build_reasoning
@@ -14,7 +16,7 @@ from .knowledge import rebuild_graph, graph
 from .repetition import due_reviews, upcoming_reviews, record_review
 from .interactive import start_exercise_session, session_state as exercise_state, submit_answer
 
-app = FastAPI(title='Tutor LLM API', version='0.6.0')
+app = FastAPI(title='Tutor LLM API', version='0.7.0')
 
 class WorkspaceIn(BaseModel):
     name: str
@@ -87,7 +89,17 @@ def startup():
 
 @app.get('/health')
 def health():
-    return {'ok': True, 'service': 'tutor-llm', 'api_version': '0.6.0'}
+    backend_ok = inference_health()
+    return {
+        'ok': backend_ok,
+        'service': 'tutor-llm',
+        'api_version': '0.7.0',
+        'deploy_mode': settings.deploy_mode,
+        'inference_provider': settings.inference_provider,
+        'chat_model': settings.chat_model,
+        'embedding_model': settings.embedding_model,
+        'inference_ready': backend_ok,
+    }
 
 @app.get('/workspaces')
 def workspaces():
