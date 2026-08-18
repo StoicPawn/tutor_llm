@@ -12,6 +12,10 @@ class ApiContractTests(unittest.TestCase):
             '/workspaces/{workspace_id}/next-activity',
             '/workspaces/{workspace_id}/documents/{document_id}/pages/{page}',
             '/exercises/sessions/{session_id}/answer',
+            '/admin/devices',
+            '/admin/devices/{device_id}',
+            '/device/me',
+            '/sync/workspaces/{workspace_id}/manifest',
         }
         self.assertTrue(expected.issubset(paths), expected-paths)
 
