@@ -62,3 +62,81 @@ struct TutorAskRequest: Codable {
     let document_ids: [Int]?
     let epistemic_mode: String
 }
+
+enum JSONValue: Codable {
+    case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([String: JSONValue].self) { self = .object(v) }
+        else { self = .array(try c.decode([JSONValue].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+
+    var value: Any {
+        switch self {
+        case .string(let v): return v
+        case .number(let v): return v
+        case .bool(let v): return v
+        case .object(let v): return v.mapValues(\.value)
+        case .array(let v): return v.map(\.value)
+        case .null: return NSNull()
+        }
+    }
+}
+
+struct SyncObject: Codable {
+    let workspace_id: Int
+    let entity_type: String
+    let client_uuid: String
+    let server_id: Int?
+    let revision: Int
+    let deleted: Bool
+    let payload: JSONValue
+    let updated_at: String?
+}
+
+struct SyncChange: Codable {
+    let seq: Int
+    let operation: String
+    let object: SyncObject?
+}
+
+struct SyncPullResponse: Codable {
+    let workspace_id: Int
+    let since: Int
+    let cursor: Int
+    let changes: [SyncChange]
+}
+
+struct SyncPushRequest: Codable {
+    let workspace_id: Int
+    let entity_type: String
+    let client_uuid: String
+    let base_revision: Int
+    let payload: JSONValue
+    let deleted: Bool
+    let server_id: Int?
+}
+
+struct SyncPushResponse: Codable {
+    let status: String
+    let object: SyncObject?
+    let server: SyncObject?
+    let expected_revision: Int?
+}
