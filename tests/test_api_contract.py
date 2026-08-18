@@ -11,6 +11,7 @@ class ApiContractTests(unittest.TestCase):
             '/workspaces/{workspace_id}/review-queue',
             '/workspaces/{workspace_id}/next-activity',
             '/workspaces/{workspace_id}/documents/{document_id}/pages/{page}',
+            '/workspaces/{workspace_id}/documents/{document_id}/source',
             '/exercises/sessions/{session_id}/answer',
             '/admin/devices',
             '/admin/devices/{device_id}',
