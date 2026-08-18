@@ -6,7 +6,7 @@ Esempi: `Matematica`, `Sistemi Operativi`, `Filosofia`, `Machine Learning`.
 
 ## Visione
 
-Il prodotto non è un semplice chatbot sui PDF. Il modello operativo è:
+Tutor LLM non è un semplice chatbot sui PDF. Il modello operativo è:
 
 ```text
 Workspace
@@ -20,6 +20,83 @@ Workspace
 ```
 
 Il materiale dell'utente è l'autorità primaria. Il modello fornisce capacità didattica, ragionamento e conoscenza generale secondo una politica epistemica esplicita.
+
+## Due modalità ufficiali di deploy
+
+Tutor LLM deve poter essere installato in **due modi diversi senza cambiare il prodotto**.
+
+### 1. Local PC
+
+Tutto gira sul computer dell'utente:
+
+```text
+UI / browser
+    |
+Tutor LLM Core
+  /        \
+SQLite    InferenceProvider
+             |
+           Ollama
+          /      \
+      Qwen    EmbeddingGemma
+```
+
+Il PC contiene documenti, database, embeddings, modelli, knowledge graph, mastery e note. Dopo l'installazione iniziale e il download dei modelli, l'uso normale può essere completamente offline.
+
+Per sviluppo:
+
+```bash
+make install
+make models
+make run
+```
+
+L'obiettivo di prodotto è un installer nativo che installi/verifichi automaticamente runtime, OCR, Ollama e modelli: l'utente finale non dovrà conoscere Git o Python.
+
+### 2. Private Tutor Server
+
+Tutor LLM Core, dati e modelli girano su un server personale. iPad, PC, telefono e futuri client si collegano a quel server:
+
+```text
+iPad / PC / phone
+        |
+ accesso privato cifrato
+        |
+ Tutor LLM API
+   /          \
+storage     InferenceProvider
+                 |
+               Ollama
+```
+
+Il server è la **source of truth** per biblioteca, workspaces, embeddings, mastery, knowledge graph, note e cronologia. I client non devono installare Llama o mantenere copie separate dello Student Model.
+
+È disponibile un primo profilo Docker Compose:
+
+```bash
+cd deploy
+cp .env.server.example .env
+docker compose -f docker-compose.server.yml up -d --build
+docker compose -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
+docker compose -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
+```
+
+Per sicurezza, il Compose pubblica Tutor LLM solo su `127.0.0.1` e **non espone Ollama**. Per accesso fuori casa va usata una rete privata/tunnel o reverse proxy autenticato; non va pubblicata direttamente su Internet la porta dell'API.
+
+Dettagli: `docs/deployment.md`.
+
+## Inference provider
+
+Il core non deve dipendere direttamente da dove gira il modello. Il confine ufficiale è:
+
+```text
+Tutor Core -> InferenceProvider -> Ollama oggi
+                              -> altri runtime privati in futuro
+```
+
+`DEPLOY_MODE=local|server` descrive dove gira Tutor Core. `INFERENCE_PROVIDER=ollama` descrive il backend di inferenza. Sono concetti separati.
+
+Questo permette in futuro di usare un runtime iPad-native, un server GPU più potente o un altro backend senza riscrivere RAG, curriculum, mastery o UI.
 
 ## Modalità epistemiche
 
@@ -37,23 +114,29 @@ Il materiale dell'utente è l'autorità primaria. Il modello fornisce capacità 
 - domande grounded sui documenti
 - riassunti trasversali e approfondimenti
 - esercizi, quiz e ragionamento
-- **sessioni di esercizi interattivi una domanda alla volta**, con correzione automatica
+- sessioni interattive domanda-per-domanda con correzione automatica
 - curriculum adattivo con prerequisiti
 - mastery distinta per workspace e concetto
-- **spaced repetition** con scheduler adattivo e ripassi dovuti
-- **knowledge graph persistente** con concetti e relazioni didattiche
-- analisi Expert della copertura della biblioteca rispetto a un obiettivo
-- note personali, anche collegate a documento e pagina
+- spaced repetition con scheduler adattivo
+- knowledge graph persistente
+- analisi Expert della copertura della biblioteca
+- flashcard e review queue
+- Next Best Activity planner
+- parsing di sezioni/capitoli
+- mapping selezione PDF → blocchi/chunk/citazione
+- note personali collegate a documento e pagina
 - Study Session persistenti con documento/pagina/testo selezionato/concetto corrente
-- **PDF page-aware**: testo pagina, dimensioni e bounding box dei blocchi nativi
-- API FastAPI per client futuri web, desktop e iPadOS
+- PDF page-aware con bounding box dei blocchi nativi
+- API FastAPI per client web, desktop e futuro iPadOS
 - export dataset e LoRA/SFT opzionale per adattare il comportamento didattico
 
 ## Architettura
 
-- **LLM locale:** Ollama + `qwen3:4b`
-- **Embedding:** Ollama + `embeddinggemma`
-- **Storage:** SQLite
+- **Tutor Core:** Python package `studyforge/`
+- **Inference:** provider abstraction + Ollama
+- **Chat model predefinito:** `qwen3:4b`
+- **Embedding model:** `embeddinggemma`
+- **Storage:** SQLite + filesystem locale/server
 - **RAG:** chunking + embeddings + cosine retrieval
 - **PDF:** PyMuPDF
 - **OCR:** Tesseract
@@ -61,76 +144,30 @@ Il materiale dell'utente è l'autorità primaria. Il modello fornisce capacità 
 - **Web client attuale:** Streamlit
 - **API:** FastAPI
 
-La logica importante vive nel package `studyforge/`; Streamlit è soltanto un client. Questo permette di costruire un'app iPad nativa senza duplicare il motore.
+GitHub contiene **codice, configurazione e definizioni di deploy**, non i modelli LLM né i dati personali. Documenti, database e pesi dei modelli restano sulla macchina che esegue Tutor LLM Core/Ollama.
 
-## Struttura
+## Configurazione
 
-```text
-studyforge/
-├── api.py
-├── assessment.py
-├── config.py
-├── coverage.py
-├── curriculum.py
-├── db.py
-├── ingest.py
-├── interactive.py
-├── knowledge.py
-├── notes.py
-├── ollama_client.py
-├── pipeline.py
-├── repetition.py
-├── retrieval.py
-├── sessions.py
-├── student.py
-├── teacher.py
-└── workspaces.py
-```
-
-## Installazione Linux / Ubuntu
+Profilo locale:
 
 ```bash
-sudo apt update
-sudo apt install -y tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng python3-venv
-ollama pull qwen3:4b
-ollama pull embeddinggemma
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+export DEPLOY_MODE=local
+export INFERENCE_PROVIDER=ollama
+export OLLAMA_URL=http://localhost:11434
+export CHAT_MODEL=qwen3:4b
+export EMBEDDING_MODEL=embeddinggemma
 ```
 
-### Client web
+Template completi:
 
-```bash
-streamlit run app.py
-```
+- `deploy/.env.local.example`
+- `deploy/.env.server.example`
 
-### API
+## API e futura app iPad
 
-```bash
-uvicorn studyforge.api:app --host 0.0.0.0 --port 8000
-```
+La logica importante vive nel package `studyforge/`; Streamlit è soltanto un client. L'iPad userà la stessa API del server/desktop.
 
-La documentazione OpenAPI è disponibile su `/docs`.
-
-## PDF page-aware e futura app iPad
-
-Per i PDF nativi Tutor LLM conserva ora, oltre al testo usato dal RAG, anche:
-
-```text
-document
-└── page
-    ├── text
-    ├── width / height
-    ├── OCR flag
-    └── blocks[]
-        ├── bbox [x0,y0,x1,y1]
-        └── text
-```
-
-Questo è il contratto necessario per una futura app iPad in cui l'utente scorre il PDF, seleziona visivamente un passaggio e lo invia al tutor. Le pagine OCR restano esplicitamente marcate perché le coordinate native non sono considerate affidabili finché non verrà introdotto OCR layout-aware.
-
-Una Study Session conserva inoltre:
+Per i PDF nativi Tutor LLM conserva pagina, testo, dimensioni, bounding box e mapping verso chunk. Una Study Session conserva:
 
 ```text
 workspace
@@ -142,81 +179,50 @@ workspace
 └── state_json
 ```
 
-Le note restano artefatti personali separati dalle fonti autorevoli e potranno ospitare handwriting/Apple Pencil.
+Questo permette una futura UI iPad con PDF, selezione del passaggio, Tutor e foglio Apple Pencil senza duplicare il motore.
 
-## Motore di apprendimento
+## Demo workspace
 
-La mastery non è trattata come un voto assoluto. È memoria operativa dello studio e viene aggiornata tramite evidenze: feedback, quiz, correzioni e sessioni interattive.
+Con Ollama e i modelli già installati:
 
-Le sessioni interattive generano esercizi progressivi, mostrano una domanda per volta, valutano la risposta sulle fonti, distinguono elementi corretti/mancanti/errori e aggiornano sia mastery sia scheduler di ripasso.
+```bash
+make demo
+```
 
-Lo scheduler usa una variante semplice del principio SM-2, corretta modestamente per la mastery: un buon risultato allunga progressivamente l'intervallo, un risultato debole riporta il concetto a breve termine. La mastery non può eliminare completamente il retrieval practice.
-
-## Knowledge graph
-
-Ogni workspace può costruire una mappa persistente con nodi (`concept`, `definition`, `theorem`, `method`, `skill`) e relazioni come `prerequisite`, `explains`, `part_of`, `contrasts`, `applies_to`, `generalizes`. Il graph è ricostruito dai materiali del workspace e rimane separato dagli altri mondi di studio.
-
-## Perché RAG + training, non fine-tuning sui libri
-
-I libri sono conoscenza variabile, sostituibile e verificabile: devono restare nel retrieval. Il training opzionale serve invece a migliorare *come* il tutor insegna: struttura, stile pedagogico e preferenze apprese dal feedback.
-
-## Migrazione dalla v0.3
-
-I database esistenti vengono migrati automaticamente. I dati preesistenti vengono associati al workspace `General`; da quel momento i nuovi dati sono isolati per workspace.
+crea localmente `Matematica Demo`, una fixture end-to-end separata dai dati reali. Vedi `docs/demo_workspace.md`.
 
 ## Test
 
 ```bash
-python -m compileall -q studyforge app.py tests
-python -m unittest discover -s tests -v
+make check
 ```
 
-GitHub Actions esegue compilazione e test a ogni push. La suite comprende verifiche di isolamento workspace anche per pagine e scheduler di ripasso.
+GitHub Actions esegue compilazione e test. La suite comprende isolamento workspace, page mapping, scheduler e contratto API.
 
-## Training personale opzionale
+## Privacy e accesso remoto
 
-```bash
-python training/export_dataset.py
-pip install -r requirements-train.txt
-python training/train_lora.py
-```
+- i documenti e il database sono esclusi da Git;
+- in modalità local possono restare interamente sul PC;
+- in modalità server restano sul server personale;
+- Ollama non deve essere esposto direttamente a Internet;
+- il server remoto deve essere raggiunto tramite accesso privato cifrato/autenticato.
 
-## Configurazione
+## Roadmap principale
 
-```bash
-export CHAT_MODEL=qwen3:4b
-export EMBEDDING_MODEL=embeddinggemma
-export OLLAMA_URL=http://localhost:11434
-export OCR_LANG=ita+eng
-export TOP_K=8
-```
-
-## Roadmap
-
-- [x] ingestione multi-formato e OCR
-- [x] RAG locale con provenance
 - [x] workspace isolati
-- [x] mastery per workspace
-- [x] curriculum adattivo
-- [x] Grounded / Tutor / Expert
-- [x] riassunti, approfondimenti, esercizi, quiz e ragionamento
-- [x] grading automatico delle risposte aperte
-- [x] esercizi interattivi domanda-per-domanda
-- [x] spaced repetition e scheduler adattivo
-- [x] knowledge graph persistente
-- [x] analisi Expert della copertura della biblioteca
-- [x] note collegate a pagine
-- [x] Study Session page-aware
-- [x] bounding box dei blocchi testuali PDF nativi
+- [x] RAG + provenance
+- [x] curriculum/mastery/knowledge graph
+- [x] spaced repetition, flashcard e review queue
+- [x] esercizi interattivi e grading
+- [x] PDF page-aware e source mapping
+- [x] Next Best Activity planner
 - [x] API-first
-- [ ] parsing strutturale indice/capitoli/sezioni
-- [ ] mapping preciso selezione PDF → span/chunk/citazione
+- [x] profili architetturali `local` e `server`
+- [x] primo Docker Compose server
+- [ ] installer desktop automatico per Windows/macOS/Linux
+- [ ] autenticazione API e gestione dispositivi
+- [ ] backup/export/import completo della conoscenza personale
+- [ ] GPU-specific server profiles
 - [ ] OCR layout-aware per formule, tabelle e figure
-- [ ] flashcard/Anki e review queue unificata
-- [ ] planner Next Best Activity che combini curriculum, mastery, graph e scadenze
 - [ ] client iPadOS con PDF, Apple Pencil e split view Tutor/Notes
-- [ ] sincronizzazione opzionale LAN/server privato mantenendo il core local-first
-
-## Privacy
-
-I documenti e il database locale sono esclusi da Git. Il flusso può funzionare interamente sulla macchina dell'utente tramite Ollama. I client futuri potranno collegarsi al core locale via API senza richiedere servizi cloud.
+- [ ] sync/cache offline controllata per client remoti
