@@ -16,6 +16,7 @@ services:
       API_TOKEN: ${API_TOKEN:?API_TOKEN is required in server mode}
     volumes:
       - tutor_data:/data
+      - ./backups:/backups
     ports:
       # Bind only to localhost by default. Expose remotely through a private tunnel
       # such as Tailscale Serve rather than publishing Tutor LLM directly on Internet.
