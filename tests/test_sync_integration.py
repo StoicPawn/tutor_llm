@@ -78,5 +78,21 @@ class SyncIntegrationTests(unittest.TestCase):
         self.assertEqual(materialized['background'],'grid')
         self.assertEqual(materialized['layers'][0]['text'],'from ipad')
 
+        second=push_change(self.wid,'notebook_page',str(uuid.uuid4()),0,{
+            'notebook_id':notebook_id,'position':2,'title':'Collision','background':'blank','layers':[]
+        })
+        second_page=[p for p in get_notebook(self.wid,notebook_id)['pages'] if p['id']==second['object']['server_id']][0]
+        self.assertNotEqual(second_page['position'],2)
+
+    def test_sync_cannot_reference_document_from_another_workspace(self):
+        other=create_workspace('Other')
+        other_doc=db.add_document(other,'other.pdf','/tmp/other.pdf')
+        with self.assertRaises(ValueError):
+            push_change(self.wid,'note',str(uuid.uuid4()),0,{'title':'bad','document_id':other_doc})
+        with self.assertRaises(ValueError):
+            push_change(self.wid,'annotation',str(uuid.uuid4()),0,{
+                'document_id':other_doc,'page':1,'kind':'highlight','bbox':[0,0,1,1]
+            })
+
 
 if __name__=='__main__': unittest.main()
