@@ -37,8 +37,9 @@ class DeviceTests(unittest.TestCase):
 
     def test_workspace_manifest_changes(self):
         first=sync.workspace_manifest(self.wid)
+        stamp='2026-01-01T00:00:00+00:00'
         with db.connect() as con:
-            con.execute('INSERT INTO notes(workspace_id,title,content,kind,created_at) VALUES(?,?,?,?,?)',(self.wid,'n','x','text','2026-01-01T00:00:00+00:00'))
+            con.execute('INSERT INTO notes(workspace_id,title,content,kind,created_at,updated_at) VALUES(?,?,?,?,?,?)',(self.wid,'n','x','text',stamp,stamp))
         second=sync.workspace_manifest(self.wid)
         self.assertNotEqual(first['revision'],second['revision'])
         self.assertEqual(second['entities']['notes']['count'],1)
