@@ -88,13 +88,24 @@ enum JSONValue: Codable {
         }
     }
 
+    static func from(any: Any) -> JSONValue {
+        switch any {
+        case let v as String: return .string(v)
+        case let v as Bool: return .bool(v)
+        case let v as NSNumber: return .number(v.doubleValue)
+        case let v as [String: Any]: return .object(v.mapValues { from(any: $0) })
+        case let v as [Any]: return .array(v.map { from(any: $0) })
+        default: return .null
+        }
+    }
+
     var value: Any {
         switch self {
         case .string(let v): return v
         case .number(let v): return v
         case .bool(let v): return v
-        case .object(let v): return v.mapValues(\.value)
-        case .array(let v): return v.map(\.value)
+        case .object(let v): return v.mapValues { $0.value }
+        case .array(let v): return v.map { $0.value }
         case .null: return NSNull()
         }
     }
