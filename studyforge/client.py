@@ -79,6 +79,10 @@ class TutorClient:
             return self._request('POST', f'/workspaces/{workspace_id}/documents',
                                  files={'file': (file_path.name, handle)})
 
+    def download_document(self, workspace_id:int, document_id:int, destination:str|Path) -> Path:
+        data=self._request('GET',f'/workspaces/{workspace_id}/documents/{document_id}/source')
+        path=Path(destination); path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(data); return path
+
     def page(self, workspace_id: int, document_id: int, page: int) -> dict:
         return self._request('GET', f'/workspaces/{workspace_id}/documents/{document_id}/pages/{page}')
 
