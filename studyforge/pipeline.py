@@ -5,6 +5,8 @@ from .config import settings
 from .db import add_document, add_chunks, add_pages
 from .ingest import extract, chunk_pages
 from .ollama_client import embed
+from .source_map import store_chunk_spans
+from .structure import rebuild_structure
 
 
 def ingest_file(workspace_id: int, src_path: str, original_name: str | None = None) -> dict:
@@ -25,9 +27,13 @@ def ingest_file(workspace_id: int, src_path: str, original_name: str | None = No
     doc_id=add_document(workspace_id,name,str(dst))
     add_pages(doc_id,pages)
     add_chunks(doc_id,chunks,embeddings)
+    store_chunk_spans(doc_id,chunks)
+    sections=[]
+    if any(p.get('page') is not None for p in pages):
+        sections=rebuild_structure(workspace_id,doc_id)
     return {
         'document_id':doc_id,'workspace_id':workspace_id,'name':name,
-        'pages':len(pages),'chunks':len(chunks),
+        'pages':len(pages),'chunks':len(chunks),'sections':len(sections),
         'layout_pages':sum(1 for p in pages if p.get('blocks')),
         'ocr_pages':sum(1 for p in pages if p.get('ocr_used')),
     }
