@@ -122,6 +122,57 @@ final class AppState: ObservableObject {
                                      serverID: serverID, baseRevision: baseRevision, payload: payload, deleted: deleted)
     }
 
+    private func documentNotebook() async throws -> (NotebookDetail, NotebookPage) {
+        guard let api, let workspace = selectedWorkspace, let document = selectedDocument else {
+            throw APIClient.APIError.invalidResponse
+        }
+        let notebooks = try await api.notebooks(workspaceID: workspace.id)
+        let notebookID: Int
+        if let existing = notebooks.first(where: { $0.linked_document_id == document.id }) {
+            notebookID = existing.id
+        } else {
+            notebookID = try await api.createNotebook(workspaceID: workspace.id, title: "Appunti — \(document.name)", documentID: document.id)
+        }
+        let detail = try await api.notebook(workspaceID: workspace.id, notebookID: notebookID)
+        guard let page = detail.pages.first else { throw APIClient.APIError.invalidResponse }
+        return (detail, page)
+    }
+
+    func savePencilDrawing(_ drawingData: Data, readingPage: Int) async {
+        do {
+            guard let workspace = selectedWorkspace, let document = selectedDocument else { throw APIClient.APIError.invalidResponse }
+            let (notebook, page) = try await documentNotebook()
+            // Ensure the sync envelope created by the server is in the local cache.
+            await syncNow()
+            guard let envelope = cache.entity(workspaceID: workspace.id, entityType: "notebook_page", serverID: page.id) else {
+                throw APIClient.APIError.invalidResponse
+            }
+            let layer: [String: Any] = [
+                "kind": "ink",
+                "strokes": [],
+                "native_format": "com.apple.PencilKit.PKDrawing",
+                "native_data_base64": drawingData.base64EncodedString(),
+                "linked_document_id": document.id,
+                "linked_page": readingPage
+            ]
+            let payload: [String: Any] = [
+                "notebook_id": notebook.id,
+                "position": page.position,
+                "title": page.title,
+                "width": page.width,
+                "height": page.height,
+                "background": page.background,
+                "layers": [layer]
+            ]
+            _ = try cache.queueChange(workspaceID: workspace.id, entityType: "notebook_page",
+                                      clientUUID: envelope.clientUUID, serverID: page.id,
+                                      baseRevision: envelope.revision, payload: payload)
+            await syncNow()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func syncNow() async {
         guard let api, let workspace = selectedWorkspace, !isSyncing else { return }
         isSyncing = true
