@@ -9,7 +9,7 @@ from .planner import next_best_activity
 from .study_view import study_workspace_state, selection_context, contextual_tutor_request, set_reading_context
 from .pdf_viewer import render_pdf_page, normalize_render_bbox, blocks_in_bbox
 from .annotations import create_annotation, list_annotations, update_annotation, delete_annotation
-from .notebooks import create_notebook, list_notebooks, get_notebook, add_page, save_page, delete_notebook
+from .notebooks import create_notebook, list_notebooks, get_notebook, add_page, update_page, delete_notebook
 
 router=APIRouter()
 
@@ -62,23 +62,21 @@ class AnnotationPatch(BaseModel):
 class NotebookIn(BaseModel):
     workspace_id:int
     title:str
-    description:str=''
-    document_id:int|None=None
-    page:int|None=None
-    concept:str|None=None
+    linked_document_id:int|None=None
+    linked_page:int|None=None
+    concept:str=''
 
 class NotebookPageIn(BaseModel):
     workspace_id:int
-    title:str=''
     background:str='blank'
-    width:float=1024
-    height:float=1365
+    title:str=''
+    layers:list[dict]=[]
 
 class NotebookPagePatch(BaseModel):
     workspace_id:int
-    layers:list[dict]
-    title:str|None=None
     background:str|None=None
+    title:str|None=None
+    layers:list[dict]|None=None
 
 class FlashcardsIn(BaseModel):
     workspace_id:int
@@ -114,13 +112,7 @@ def selection_map(payload:SelectionIn):
 def render_page(workspace_id:int,document_id:int,page:int,scale:float=1.6):
     try:
         data=render_pdf_page(workspace_id,document_id,page,scale)
-        headers={
-            'X-Page-Count':str(data['page_count']),
-            'X-Source-Width':str(data['source_width']),
-            'X-Source-Height':str(data['source_height']),
-            'X-Render-Width':str(data['render_width']),
-            'X-Render-Height':str(data['render_height']),
-        }
+        headers={'X-Page-Count':str(data['page_count']),'X-Source-Width':str(data['source_width']),'X-Source-Height':str(data['source_height']),'X-Render-Width':str(data['render_width']),'X-Render-Height':str(data['render_height'])}
         return Response(content=data['png'],media_type='image/png',headers=headers)
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
@@ -140,9 +132,7 @@ def annotations(workspace_id:int,document_id:int,page:int|None=None,limit:int=50
 
 @router.post('/annotations')
 def annotation_create(payload:AnnotationIn):
-    try:
-        aid=create_annotation(payload.workspace_id,payload.document_id,payload.page,payload.kind,bbox=payload.bbox,text=payload.text,payload=payload.payload)
-        return {'id':aid}
+    try: return {'id':create_annotation(payload.workspace_id,payload.document_id,payload.page,payload.kind,bbox=payload.bbox,text=payload.text,payload=payload.payload)}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.patch('/annotations/{annotation_id}')
@@ -155,15 +145,11 @@ def annotation_delete(workspace_id:int,annotation_id:int):
     delete_annotation(workspace_id,annotation_id); return {'ok':True}
 
 @router.get('/workspaces/{workspace_id}/notebooks')
-def notebooks(workspace_id:int):
-    try: return list_notebooks(workspace_id)
-    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+def notebooks(workspace_id:int): return list_notebooks(workspace_id)
 
 @router.post('/notebooks')
 def notebook_create(payload:NotebookIn):
-    try:
-        nid=create_notebook(payload.workspace_id,payload.title,payload.description,document_id=payload.document_id,page=payload.page,concept=payload.concept)
-        return get_notebook(payload.workspace_id,nid)
+    try: return {'id':create_notebook(payload.workspace_id,payload.title,payload.linked_document_id,payload.linked_page,payload.concept)}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.get('/workspaces/{workspace_id}/notebooks/{notebook_id}')
@@ -174,12 +160,12 @@ def notebook_get(workspace_id:int,notebook_id:int):
 
 @router.post('/notebooks/{notebook_id}/pages')
 def notebook_page_add(notebook_id:int,payload:NotebookPageIn):
-    try: return add_page(payload.workspace_id,notebook_id,title=payload.title,background=payload.background,width=payload.width,height=payload.height)
+    try: return {'id':add_page(payload.workspace_id,notebook_id,payload.background,payload.title,payload.layers)}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.patch('/notebooks/{notebook_id}/pages/{page_id}')
-def notebook_page_save(notebook_id:int,page_id:int,payload:NotebookPagePatch):
-    try: return save_page(payload.workspace_id,notebook_id,page_id,layers=payload.layers,title=payload.title,background=payload.background)
+def notebook_page_patch(notebook_id:int,page_id:int,payload:NotebookPagePatch):
+    try: return update_page(payload.workspace_id,notebook_id,page_id,background=payload.background,title=payload.title,layers=payload.layers)
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.delete('/workspaces/{workspace_id}/notebooks/{notebook_id}')
@@ -195,13 +181,8 @@ def study_state(workspace_id:int,session_id:int|None=None,document_id:int|None=N
 def context_action(payload:ContextActionIn):
     try:
         mapped=selection_context(payload.workspace_id,payload.document_id,payload.page,payload.selected_text,payload.bbox)
-        if payload.session_id is not None:
-            set_reading_context(payload.session_id,payload.workspace_id,payload.document_id,payload.page,mapped.get('selected_text',''))
-        return {
-            'selection':mapped,
-            'prompt':contextual_tutor_request(payload.action,mapped,payload.user_instruction),
-            'action':payload.action,
-        }
+        if payload.session_id is not None: set_reading_context(payload.session_id,payload.workspace_id,payload.document_id,payload.page,mapped.get('selected_text',''))
+        return {'selection':mapped,'prompt':contextual_tutor_request(payload.action,mapped,payload.user_instruction),'action':payload.action}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.post('/flashcards/generate')
@@ -210,8 +191,7 @@ def flashcards_generate(payload:FlashcardsIn):
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.get('/workspaces/{workspace_id}/flashcards')
-def flashcards(workspace_id:int,limit:int=100):
-    return list_flashcards(workspace_id,limit)
+def flashcards(workspace_id:int,limit:int=100): return list_flashcards(workspace_id,limit)
 
 @router.post('/flashcards/{flashcard_id}/review')
 def flashcard_review(flashcard_id:int,payload:FlashcardReviewIn):
@@ -219,13 +199,13 @@ def flashcard_review(flashcard_id:int,payload:FlashcardReviewIn):
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.delete('/workspaces/{workspace_id}/flashcards/{flashcard_id}')
-def flashcard_archive(workspace_id:int,flashcard_id:int):
-    archive_flashcard(workspace_id,flashcard_id); return {'ok':True}
+def flashcard_archive(workspace_id:int,flashcard_id:int): archive_flashcard(workspace_id,flashcard_id); return {'ok':True}
 
 @router.get('/workspaces/{workspace_id}/review-queue')
-def queue(workspace_id:int,limit:int=20):
-    return review_queue(workspace_id,limit)
+def queue(workspace_id:int,limit:int=20): return review_queue(workspace_id,limit)
 
 @router.get('/workspaces/{workspace_id}/next-activity')
-def next_activity(workspace_id:int,curriculum_id:int|None=None):
-    return next_best_activity(workspace_id,curriculum_id)
+def next_activity(workspace_id:int,curriculum_id:int|None=None): return next_best_activity(workspace_id,curriculum_id)
+
+from .api_devices import router as device_router
+router.include_router(device_router)
