@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,16 +32,38 @@ class BackupTests(unittest.TestCase):
         db.settings=self.old_db_settings; backup.settings=self.old_backup_settings
         self.tmp.cleanup()
 
-    def test_export_contains_database_and_uploads(self):
+    def _archive(self):
         archive=Path(self.tmp.name)/'backup.zip'
-        out=backup.export_backup(str(archive))
-        manifest=backup.inspect_backup(out)
+        backup.export_backup(str(archive))
+        return archive
+
+    def test_export_contains_database_and_uploads(self):
+        archive=self._archive()
+        manifest=backup.inspect_backup(str(archive))
         self.assertEqual(manifest['format'],'tutor-llm-backup')
         self.assertFalse(manifest['models_included'])
         import zipfile
-        with zipfile.ZipFile(out) as zf:
+        with zipfile.ZipFile(archive) as zf:
             names=set(zf.namelist())
         self.assertIn('studyforge.db',names)
         self.assertIn(f'uploads/{self.wid}/book.txt',names)
+
+    def test_restore_relocates_document_paths(self):
+        archive=self._archive()
+        target=Path(self.tmp.name)/'server'
+        fake=SimpleNamespace(
+            db_path=str(target/'studyforge.db'), upload_dir=str(target/'uploads'), deploy_mode='server',
+            chat_model='test-chat', embedding_model='test-embed'
+        )
+        backup.settings=fake
+        backup.import_backup(str(archive), replace=True)
+        con=sqlite3.connect(fake.db_path)
+        try:
+            path=con.execute("SELECT path FROM documents WHERE name='book.txt'").fetchone()[0]
+        finally:
+            con.close()
+        expected=target/'uploads'/str(self.wid)/'book.txt'
+        self.assertEqual(Path(path),expected)
+        self.assertEqual(expected.read_text(encoding='utf-8'),'hello')
 
 if __name__=='__main__': unittest.main()
