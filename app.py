@@ -2,10 +2,12 @@ from __future__ import annotations
 import json, os, tempfile
 import streamlit as st
 from studyforge.config import settings
-from studyforge.db import list_documents, save_lesson, rate_lesson, delete_document, recent_lessons
+from studyforge.db import list_documents, save_lesson, delete_document, recent_lessons
 from studyforge.ollama_client import health
 from studyforge.pipeline import ingest_file
 from studyforge.teacher import build_lesson, build_quiz, answer_question, summarize, deepen, build_exercises, build_reasoning
+from studyforge.assessment import grade_answer
+from studyforge.coverage import analyze_coverage
 from studyforge.student import record_result, weakest, mastery_for
 from studyforge.curriculum import create_curriculum, list_curricula, curriculum_nodes, curriculum_document_ids, next_node, set_node_status, delete_curriculum
 from studyforge.workspaces import ensure_default_workspace, create_workspace, list_workspaces, get_workspace
@@ -83,12 +85,35 @@ with t_path:
     goal = st.text_input('Obiettivo del percorso', value=(workspace['goal'] if workspace else ''),
                          placeholder='Es. arrivare a un livello avanzato di analisi matematica')
     cname = st.text_input('Nome percorso', value='Percorso principale')
-    if st.button('Analizza biblioteca e crea syllabus', disabled=not goal or not selected_ids):
+    c_cov, c_syl = st.columns(2)
+    if c_cov.button('Valuta copertura biblioteca', disabled=not goal or not selected_ids):
+        try:
+            with st.spinner('Valuto cosa copre davvero la biblioteca...'):
+                st.session_state.coverage = analyze_coverage(workspace_id, goal, selected_ids)
+        except Exception as e: st.error(str(e))
+    if c_syl.button('Crea syllabus', disabled=not goal or not selected_ids):
         try:
             with st.spinner('Costruisco concetti e prerequisiti...'):
                 create_curriculum(workspace_id, cname, goal, selected_ids)
             st.rerun()
         except Exception as e: st.error(str(e))
+    if st.session_state.get('coverage'):
+        cov = st.session_state.coverage
+        st.metric('Copertura stimata', f"{float(cov['coverage']):.0%}", cov.get('level_supported',''))
+        st.write(cov.get('library_assessment',''))
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown('**Solido**')
+            for x in cov.get('strong',[]): st.write('✓ ' + str(x.get('topic','')))
+        with c2:
+            st.markdown('**Parziale**')
+            for x in cov.get('partial',[]): st.write('△ ' + str(x.get('topic','')))
+        with c3:
+            st.markdown('**Mancante**')
+            for x in cov.get('missing',[]): st.write('○ ' + str(x.get('topic','')))
+        if cov.get('recommended_next'):
+            st.markdown('**Prossimi passi consigliati**')
+            for i, x in enumerate(cov['recommended_next'],1): st.write(f"{i}. {x}")
     curricula = list_curricula(workspace_id)
     if curricula:
         labels = {f"{r['title']} — {r['goal']} (#{r['id']})": int(r['id']) for r in curricula}
@@ -162,10 +187,23 @@ with t_exercises:
         except Exception as e: st.error(str(e))
     if st.session_state.get('activity_content'):
         st.markdown(st.session_state.activity_content)
-        score = st.slider('Risultato / autovalutazione', 0, 100, 70)
-        if st.button('Registra risultato'):
-            record_result(workspace_id, st.session_state.activity_topic, score/100, activity.lower())
-            st.success('Mastery del workspace aggiornata.')
+    st.divider()
+    st.markdown('**Correzione automatica di una risposta**')
+    grade_question = st.text_area('Domanda da valutare', key='grade_question')
+    grade_answer_text = st.text_area('La tua risposta', key='grade_answer')
+    if st.button('Correggi e aggiorna mastery', disabled=not topic or not grade_question or not grade_answer_text or not selected_ids):
+        try:
+            with st.spinner('Valuto la risposta sulle fonti...'):
+                st.session_state.grade_result = grade_answer(workspace_id, topic, grade_question, grade_answer_text, selected_ids)
+        except Exception as e: st.error(str(e))
+    if st.session_state.get('grade_result'):
+        g = st.session_state.grade_result
+        st.metric('Valutazione', f"{float(g['score']):.0%}", f"mastery {float(g['mastery']):.0%}")
+        st.write(g.get('feedback',''))
+        if g.get('correct'): st.success('Corretto: ' + '; '.join(g['correct']))
+        if g.get('missing'): st.warning('Da completare: ' + '; '.join(g['missing']))
+        if g.get('errors'): st.error('Errori: ' + '; '.join(g['errors']))
+        if g.get('next_question'): st.info('Prossima domanda: ' + g['next_question'])
 
 with t_notes:
     st.subheader('Note e fogli di studio')
