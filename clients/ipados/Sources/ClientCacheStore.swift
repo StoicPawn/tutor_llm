@@ -131,6 +131,13 @@ final class ClientCacheStore: ObservableObject {
         return (try? context.fetch(descriptor)) ?? []
     }
 
+    func entity(workspaceID: Int, entityType: String, serverID: Int) -> CachedSyncEntity? {
+        let descriptor = FetchDescriptor<CachedSyncEntity>(predicate: #Predicate {
+            $0.workspaceID == workspaceID && $0.entityType == entityType && $0.serverID == serverID
+        })
+        return try? context.fetch(descriptor).first
+    }
+
     func applyRemote(_ object: SyncObject) throws {
         let key = "\(object.workspace_id):\(object.entity_type):\(object.client_uuid)"
         let descriptor = FetchDescriptor<CachedSyncEntity>(predicate: #Predicate { $0.key == key })
