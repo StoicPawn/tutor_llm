@@ -7,13 +7,17 @@ final class AppState: ObservableObject {
     @Published var token = ""
     @Published var isConfigured = false
     @Published var isLoading = false
+    @Published var isSyncing = false
     @Published var errorMessage: String?
     @Published var health: HealthResponse?
     @Published var workspaces: [Workspace] = []
     @Published var selectedWorkspace: Workspace?
     @Published var documents: [DocumentItem] = []
     @Published var selectedDocument: DocumentItem?
+    @Published var lastSyncAt: Date?
+    @Published var conflictCount = 0
 
+    let cache = ClientCacheStore()
     private var api: APIClient?
 
     init() {
@@ -65,7 +69,10 @@ final class AppState: ObservableObject {
         do {
             workspaces = try await api.workspaces()
             if selectedWorkspace == nil { selectedWorkspace = workspaces.first }
-            if let selectedWorkspace { await loadDocuments(workspace: selectedWorkspace) }
+            if let selectedWorkspace {
+                await loadDocuments(workspace: selectedWorkspace)
+                await syncNow()
+            }
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -73,6 +80,7 @@ final class AppState: ObservableObject {
         selectedWorkspace = workspace
         selectedDocument = nil
         await loadDocuments(workspace: workspace)
+        await syncNow()
     }
 
     func loadDocuments(workspace: Workspace) async {
@@ -88,8 +96,67 @@ final class AppState: ObservableObject {
         return try await api.ask(workspaceID: workspace.id, question: text, documentIDs: selectedDocument.map { [$0.id] }, mode: mode)
     }
 
-    func loadSelectedPDF() async throws -> Data {
-        guard let api, let workspace = selectedWorkspace, let document = selectedDocument else { throw APIClient.APIError.invalidResponse }
-        return try await api.sourceDocument(workspaceID: workspace.id, documentID: document.id)
+    func selectedPDFURL() async throws -> URL {
+        guard let workspace = selectedWorkspace, let document = selectedDocument else { throw APIClient.APIError.invalidResponse }
+        if let local = cache.cachedDocument(workspaceID: workspace.id, documentID: document.id) { return local }
+        guard let api else { throw APIClient.APIError.invalidResponse }
+        let data = try await api.sourceDocument(workspaceID: workspace.id, documentID: document.id)
+        return try cache.saveDocument(data: data, workspaceID: workspace.id, documentID: document.id, name: document.name)
+    }
+
+    func makeSelectedDocumentAvailableOffline() async {
+        do { _ = try await selectedPDFURL() }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func isSelectedDocumentOffline() -> Bool {
+        guard let workspace = selectedWorkspace, let document = selectedDocument else { return false }
+        return cache.cachedDocument(workspaceID: workspace.id, documentID: document.id) != nil
+    }
+
+    func queueOfflineChange(entityType: String, clientUUID: String = UUID().uuidString,
+                            serverID: Int? = nil, baseRevision: Int = 0,
+                            payload: [String: Any], deleted: Bool = false) throws -> String {
+        guard let workspace = selectedWorkspace else { throw APIClient.APIError.invalidResponse }
+        return try cache.queueChange(workspaceID: workspace.id, entityType: entityType, clientUUID: clientUUID,
+                                     serverID: serverID, baseRevision: baseRevision, payload: payload, deleted: deleted)
+    }
+
+    func syncNow() async {
+        guard let api, let workspace = selectedWorkspace, !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            let localState = cache.state(for: workspace.id)
+            let pulled = try await api.syncPull(workspaceID: workspace.id, since: localState.cursor)
+            for change in pulled.changes {
+                if let object = change.object { try cache.applyRemote(object) }
+            }
+            localState.cursor = pulled.cursor
+
+            for local in cache.dirtyEntities(workspaceID: workspace.id) {
+                let object = try JSONSerialization.jsonObject(with: local.payload)
+                let json = JSONValue.from(any: object)
+                let response = try await api.syncPush(SyncPushRequest(
+                    workspace_id: workspace.id, entity_type: local.entityType, client_uuid: local.clientUUID,
+                    base_revision: local.revision, payload: json, deleted: local.deleted, server_id: local.serverID
+                ))
+                if response.status == "applied", let server = response.object {
+                    try cache.markApplied(local, server: server)
+                } else if response.status == "conflict" {
+                    try cache.markConflict(local)
+                }
+            }
+
+            let manifest = try await api.manifest(workspaceID: workspace.id)
+            localState.manifestRevision = manifest.revision
+            localState.lastSyncAt = Date()
+            lastSyncAt = localState.lastSyncAt
+            conflictCount = cache.dirtyEntities(workspaceID: workspace.id).filter(\.conflict).count
+            try localState.modelContext?.save()
+        } catch {
+            // Offline is expected: cached PDFs and dirty artifacts remain usable.
+            errorMessage = error.localizedDescription
+        }
     }
 }
