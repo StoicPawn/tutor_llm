@@ -28,6 +28,22 @@ struct StudioView: View {
             .frame(minWidth: 360, idealWidth: 430)
         }
         .task(id: state.selectedDocument?.id) { await loadPDF() }
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if state.conflictCount > 0 {
+                    Label("\(state.conflictCount)", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .help("Conflitti di sincronizzazione da risolvere")
+                }
+                Button {
+                    Task { await state.syncNow() }
+                } label: {
+                    if state.isSyncing { ProgressView() }
+                    else { Image(systemName: "arrow.triangle.2.circlepath") }
+                }
+                .help("Sincronizza")
+            }
+        }
     }
 
     private var documentPane: some View {
@@ -37,6 +53,20 @@ struct StudioView: View {
                     Text(document.name).font(.headline).lineLimit(1)
                 } else { Text("Nessun documento").foregroundStyle(.secondary) }
                 Spacer()
+                if state.isSelectedDocumentOffline() {
+                    Label("Offline", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if state.selectedDocument != nil {
+                    Button {
+                        Task {
+                            await state.makeSelectedDocumentAvailableOffline()
+                            await loadPDF()
+                        }
+                    } label: {
+                        Label("Scarica", systemImage: "arrow.down.circle")
+                    }
+                    .font(.caption)
+                }
                 Text("Pagina \(currentPage)").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal).padding(.vertical, 10)
@@ -82,6 +112,7 @@ struct StudioView: View {
             HStack {
                 Text("Foglio libero").font(.headline)
                 Spacer()
+                Text("PencilKit").font(.caption).foregroundStyle(.secondary)
                 Button("Pulisci") { drawingData = Data() }
             }
             .padding()
@@ -93,8 +124,13 @@ struct StudioView: View {
     private func loadPDF() async {
         pdfData = nil
         guard state.selectedDocument != nil else { return }
-        do { pdfData = try await state.loadSelectedPDF() }
-        catch { state.errorMessage = error.localizedDescription }
+        do {
+            let url = try await state.selectedPDFURL()
+            pdfData = try Data(contentsOf: url, options: .mappedIfSafe)
+        } catch {
+            // If the document is not cached and the network is unavailable, the reader cannot open it.
+            state.errorMessage = error.localizedDescription
+        }
     }
 
     private func askTutor() async {
