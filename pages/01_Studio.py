@@ -10,11 +10,12 @@ from studyforge.teacher import answer_question, deepen
 from studyforge.interactive import start_exercise_session
 from studyforge.repetition import schedule_concept
 from studyforge.study_view import study_workspace_state, set_reading_context, selection_context, contextual_tutor_request
+from studyforge.pdf_viewer import render_pdf_page, blocks_in_bbox
 
 st.set_page_config(page_title='Tutor LLM · Studio', page_icon='📖', layout='wide')
 ensure_default_workspace()
 st.title('Studio')
-st.caption('Documento · Tutor · Note nello stesso contesto di apprendimento')
+st.caption('Documento reale · Tutor contestuale · Note · stesso stato per desktop e futuro iPad')
 
 workspaces=list_workspaces()
 workspace_labels={f"{w['name']} (#{w['id']})":int(w['id']) for w in workspaces}
@@ -41,13 +42,15 @@ current=study_workspace_state(workspace_id,sid)
 default_doc=current.get('active_document_id')
 default_label=next((k for k,v in doc_labels.items() if v==default_doc),list(doc_labels)[0])
 
-bar1,bar2,bar3=st.columns([4,1.2,1.2])
+bar1,bar2,bar3,bar4=st.columns([4,1,1,1.2])
 with bar1:
     doc_label=st.selectbox('Documento',list(doc_labels),index=list(doc_labels).index(default_label))
     document_id=doc_labels[doc_label]
 with bar2:
     page=st.number_input('Pagina',min_value=1,value=int(current.get('active_page') or 1),step=1)
 with bar3:
+    zoom=st.select_slider('Zoom',options=[1.0,1.25,1.5,1.75,2.0,2.5],value=1.5)
+with bar4:
     if st.button('Nuova sessione'):
         st.session_state.study_session_id=start_session(workspace_id,workspace['goal'] if workspace else '')
         st.rerun()
@@ -56,25 +59,43 @@ set_reading_context(sid,workspace_id,document_id,int(page))
 state=study_workspace_state(workspace_id,sid,document_id,int(page))
 page_data=state.get('page')
 
-left,right=st.columns([1.35,1],gap='large')
+left,right=st.columns([1.4,1],gap='large')
 with left:
     st.subheader('Documento')
-    if not page_data:
-        st.warning('Pagina non disponibile. Il documento potrebbe non avere pagine fisiche o la pagina richiesta non esiste.')
-    else:
-        st.caption(f"{page_data['document_name']} · p. {page_data['page']} · layout blocks {len(page_data['blocks'])} · OCR {'sì' if page_data['ocr_used'] else 'no'}")
-        st.markdown('---')
-        st.text_area('Testo pagina',value=page_data['text'],height=470,disabled=True,label_visibility='collapsed')
+    rendered=None
+    try:
+        rendered=render_pdf_page(workspace_id,document_id,int(page),float(zoom))
+        st.caption(f"{rendered['document_name']} · p. {rendered['page']}/{rendered['page_count']} · {rendered['source_width']:.0f}×{rendered['source_height']:.0f} pt")
+        st.image(rendered['png'],use_container_width=True)
+    except Exception:
+        if not page_data:
+            st.warning('Pagina non disponibile. Il documento potrebbe non avere pagine fisiche o la pagina richiesta non esiste.')
+        else:
+            st.caption(f"{page_data['document_name']} · p. {page_data['page']} · layout blocks {len(page_data['blocks'])} · OCR {'sì' if page_data['ocr_used'] else 'no'}")
+            st.text_area('Contenuto',value=page_data['text'],height=470,disabled=True,label_visibility='collapsed')
 
-    st.markdown('### Selezione / passaggio')
-    selection_text=st.text_area('Incolla o seleziona il passaggio su cui vuoi lavorare',value=st.session_state.get('study_selection',''),height=120,placeholder='Nel client iPad questo campo verrà popolato direttamente dalla selezione nel PDF.')
+    st.markdown('### Selezione contestuale')
+    block_text=''
+    if page_data and page_data.get('blocks'):
+        block_options={f"{i+1}. {b.get('text','')[:100]}":i for i,b in enumerate(page_data['blocks'])}
+        picked=st.multiselect('Blocchi della pagina',list(block_options),help='Nel client iPad il rettangolo di selezione produrrà automaticamente questi blocchi e le coordinate sorgente.')
+        indices=[block_options[x] for x in picked]
+        chosen_blocks=[page_data['blocks'][i] for i in indices]
+        block_text='\n'.join(b.get('text','') for b in chosen_blocks if b.get('text')).strip()
+        if chosen_blocks:
+            xs0=[b['bbox'][0] for b in chosen_blocks]; ys0=[b['bbox'][1] for b in chosen_blocks]
+            xs1=[b['bbox'][2] for b in chosen_blocks]; ys1=[b['bbox'][3] for b in chosen_blocks]
+            st.session_state.study_bbox=[min(xs0),min(ys0),max(xs1),max(ys1)]
+            st.caption('Bounding box sorgente: '+', '.join(f'{x:.1f}' for x in st.session_state.study_bbox))
+
+    selection_text=st.text_area('Passaggio selezionato',value=block_text or st.session_state.get('study_selection',''),height=120,placeholder='Seleziona uno o più blocchi oppure incolla il testo.')
     st.session_state.study_selection=selection_text
     if selection_text and page_data:
         try:
-            mapped=selection_context(workspace_id,document_id,int(page),selection_text)
+            mapped=selection_context(workspace_id,document_id,int(page),selection_text,st.session_state.get('study_bbox'))
             st.session_state.study_mapped_selection=mapped
             top=mapped.get('matches',[None])[0]
-            if top: st.caption(f"Collegato a chunk {top['chunk_index']} · confidenza {top['score']:.0%} · {mapped['citation']}")
+            if top: st.caption(f"Chunk {top['chunk_index']} · confidenza {top['score']:.0%} · {mapped['citation']}")
         except Exception as exc: st.warning(str(exc))
 
     actions=st.columns(6)
@@ -85,13 +106,13 @@ with left:
     extra=st.text_input('Istruzione aggiuntiva',placeholder='Es. spiegalo intuitivamente prima della formalizzazione')
     if chosen:
         try:
-            mapped=st.session_state.get('study_mapped_selection') or selection_context(workspace_id,document_id,int(page),selection_text)
+            mapped=st.session_state.get('study_mapped_selection') or selection_context(workspace_id,document_id,int(page),selection_text,st.session_state.get('study_bbox'))
             prompt=contextual_tutor_request(chosen,mapped,extra)
             if chosen=='deepen': content,sources=deepen(workspace_id,prompt,[document_id],epistemic_mode)
             elif chosen=='exercise':
                 exercise_sid=start_exercise_session(workspace_id,selection_text,[document_id],4,epistemic_mode)
                 st.session_state.exercise_session_id=exercise_sid
-                content='Ho creato una sessione di esercizi mirata sul passaggio selezionato. Apri la pagina principale → Esercizi per svolgerla.'; sources=[]
+                content='Ho creato una sessione di esercizi mirata sul passaggio selezionato.'; sources=[]
             else: content,sources=answer_question(workspace_id,prompt,[document_id],epistemic_mode)
             st.session_state.study_tutor_content=content; st.session_state.study_tutor_sources=sources
             set_reading_context(sid,workspace_id,document_id,int(page),selection_text)
@@ -101,7 +122,7 @@ with right:
     tutor_tab,notes_tab,plan_tab=st.tabs(['Tutor','Note','Oggi'])
     with tutor_tab:
         st.subheader('Tutor contestuale')
-        q=st.text_area('Chiedi qualcosa',height=100,placeholder='Il tutor conosce workspace, documento e pagina correnti.')
+        q=st.text_area('Chiedi qualcosa',height=100,placeholder='Il tutor conosce workspace, documento, pagina e selezione correnti.')
         if st.button('Invia al Tutor',type='primary',disabled=not q):
             try:
                 contextual=q
@@ -117,13 +138,13 @@ with right:
     with notes_tab:
         st.subheader('Foglio di studio')
         note_title=st.text_input('Titolo',value=f"{page_data['document_name'] if page_data else 'Nota'} · p.{page}")
-        note_body=st.text_area('Nota',height=300,placeholder='Scrivi appunti, passaggi, formule o idee. Su iPad questo spazio diventerà anche un foglio Apple Pencil.')
+        seed=st.session_state.get('note_seed','')
+        note_body=st.text_area('Nota',value=seed,height=300,placeholder='Scrivi appunti, passaggi, formule o idee. Su iPad questo spazio diventerà anche un foglio Apple Pencil.')
         if st.button('Salva nota',disabled=not note_title):
             create_note(workspace_id,note_title,note_body,document_id=document_id,page=int(page))
-            st.success('Nota salvata nel workspace.')
+            st.session_state.note_seed=''; st.success('Nota salvata nel workspace.')
         if selection_text and st.button('Aggiungi selezione alla nota'):
-            st.session_state.note_seed=(st.session_state.get('note_seed','')+'\n'+selection_text).strip()
-            st.info('Selezione memorizzata come seme per una nota; l’editor Pencil userà lo stesso legame documento/pagina.')
+            st.session_state.note_seed=(note_body+'\n\n'+selection_text).strip(); st.rerun()
 
     with plan_tab:
         st.subheader('Next Best Activity')
@@ -139,6 +160,4 @@ with right:
             st.markdown('**Concetti deboli**')
             for r in weak[:5]: st.write(f"• {r['name']} · mastery {float(r['mastery']):.0%}")
         if selection_text and st.button('Metti questo concetto in ripasso'):
-            concept=selection_text[:180]
-            schedule_concept(workspace_id,concept)
-            st.success('Aggiunto alla coda di ripasso.')
+            schedule_concept(workspace_id,selection_text[:180]); st.success('Aggiunto alla coda di ripasso.')
