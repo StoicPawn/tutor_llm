@@ -86,4 +86,32 @@ actor APIClient {
         let (data, _) = try await request("/sync/workspaces/\(workspaceID)/manifest")
         return try decoder.decode(SyncManifest.self, from: data)
     }
+
+    func syncPull(workspaceID: Int, since: Int, limit: Int = 500) async throws -> SyncPullResponse {
+        let (data, _) = try await request("/sync/workspaces/\(workspaceID)/changes?since=\(since)&limit=\(limit)")
+        return try decoder.decode(SyncPullResponse.self, from: data)
+    }
+
+    func syncPush(_ payload: SyncPushRequest) async throws -> SyncPushResponse {
+        let body = try encoder.encode(payload)
+        let (data, _) = try await request("/sync/push", method: "POST", body: body)
+        return try decoder.decode(SyncPushResponse.self, from: data)
+    }
+
+    func syncResolve(workspaceID: Int, entityType: String, clientUUID: String, serverRevision: Int,
+                     payload: JSONValue, deleted: Bool = false) async throws -> SyncPushResponse {
+        struct ResolveRequest: Codable {
+            let workspace_id: Int
+            let entity_type: String
+            let client_uuid: String
+            let server_revision: Int
+            let payload: JSONValue
+            let deleted: Bool
+        }
+        let req = ResolveRequest(workspace_id: workspaceID, entity_type: entityType, client_uuid: clientUUID,
+                                 server_revision: serverRevision, payload: payload, deleted: deleted)
+        let body = try encoder.encode(req)
+        let (data, _) = try await request("/sync/resolve", method: "POST", body: body)
+        return try decoder.decode(SyncPushResponse.self, from: data)
+    }
 }
