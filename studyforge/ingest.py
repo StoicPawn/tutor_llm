@@ -39,7 +39,6 @@ def extract(path: str) -> list[dict]:
             if len(text) < 80:
                 pix=page.get_pixmap(matrix=fitz.Matrix(2,2), alpha=False)
                 text=_ocr_pixmap(pix).strip(); ocr_used=True
-                # OCR plain text has no trustworthy source coordinates yet.
                 blocks=[]
             if text:
                 pages.append({'page':i+1,'text':text,'blocks':blocks,'width':float(page.rect.width),'height':float(page.rect.height),'ocr_used':ocr_used})
@@ -65,8 +64,14 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
                 cut=max(piece.rfind('. '),piece.rfind('; '),piece.rfind('\n'))
                 if cut > size*.55:
                     end=start+cut+1; piece=text[start:end]
-            if piece.strip():
-                out.append({'page':page.get('page'),'chunk_index':idx,'text':piece.strip()}); idx+=1
+            clean=piece.strip()
+            if clean:
+                left_trim=len(piece)-len(piece.lstrip())
+                right_trim=len(piece)-len(piece.rstrip())
+                out.append({
+                    'page':page.get('page'),'chunk_index':idx,'text':clean,
+                    'char_start':start+left_trim,'char_end':end-right_trim,
+                }); idx+=1
             if end >= len(text): break
             start=max(start+1,end-overlap)
     return out
