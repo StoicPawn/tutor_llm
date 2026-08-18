@@ -56,14 +56,24 @@ The server is the source of truth for documents, embeddings, workspaces, notes, 
 ```bash
 cd deploy
 cp .env.server.example .env
-docker compose -f docker-compose.server.yml up -d --build
-docker compose -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
-docker compose -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+# paste the generated value into API_TOKEN in .env
+docker compose --env-file .env -f docker-compose.server.yml up -d --build
+docker compose --env-file .env -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
+docker compose --env-file .env -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
 ```
+
+`API_TOKEN` is mandatory in server mode. Every operational API request must send:
+
+```text
+Authorization: Bearer <API_TOKEN>
+```
+
+The health endpoint and OpenAPI documentation remain public for diagnostics; workspace content, documents, tutor operations, notes and study state require authentication.
 
 The Compose profile intentionally publishes Tutor LLM only on `127.0.0.1:8000` and does not publish Ollama at all. Remote access should be provided by a private VPN/tunnel or an authenticated TLS reverse proxy. Do not expose the raw Tutor API or Ollama directly to the public Internet.
 
-A practical personal deployment is to use Tailscale Serve (or an equivalent private network solution) to proxy the server's localhost Tutor endpoint to authenticated devices in the private network.
+A practical personal deployment is to use a private network/tunnel to proxy the server's localhost Tutor endpoint to authenticated devices. The Tutor API token remains a second application-level protection even inside that private network.
 
 ### GPU
 
@@ -80,6 +90,28 @@ Tutor Core -> InferenceProvider -> Ollama today
 
 `DEPLOY_MODE` describes where Tutor Core is deployed; `INFERENCE_PROVIDER` describes how it obtains generation/embedding inference. They are deliberately separate concepts.
 
-## Data and migration
+## Backup, restore and migration
 
-GitHub contains source code and installation/deployment definitions, not user data or model weights. A future backup/export feature must move the user state (database + documents + related assets) independently from application installation. Model weights can normally be downloaded again on the destination machine.
+GitHub contains source code and deployment definitions, not user data or model weights. Tutor LLM backups contain the SQLite state plus uploaded documents, but intentionally exclude model weights.
+
+Create a backup:
+
+```bash
+make backup
+```
+
+Restore onto another local installation, with Tutor services stopped:
+
+```bash
+make restore ARCHIVE=/path/to/tutor-llm-backup-....zip
+```
+
+This is also the migration path from a personal PC to a private server:
+
+```text
+Local PC -> export backup -> install Tutor Server -> restore backup -> download models
+```
+
+The destination can download Qwen/embedding weights again, while preserving workspaces, documents, chunks/embeddings, notes, mastery, curricula, knowledge graph, reviews and other database state.
+
+Before any destructive restore, create a fresh backup of the destination. Restore is designed to run while Tutor LLM services are stopped so the SQLite database and uploaded files cannot change during replacement.
