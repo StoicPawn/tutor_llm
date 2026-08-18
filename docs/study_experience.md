@@ -4,19 +4,35 @@ Tutor LLM treats studying as a persistent session, not a sequence of unrelated p
 
 ## Core layout
 
-The reference client uses three coordinated areas:
+The reference client uses coordinated areas:
 
 ```text
 Document / PDF          Tutor + Notes
 ------------------      ------------------------
-current page            contextual conversation
-selected passage   ->   explain / why / deepen
+rendered current page   contextual conversation
+visual selection   ->   explain / why / deepen
 page provenance         examples / prerequisites
                         personal notes
                         next best activity
 ```
 
-The Streamlit reference implementation is `pages/01_Studio.py`. It is intentionally a client of reusable logic in `studyforge/study_view.py`; product logic must not migrate into Streamlit-specific code.
+The Streamlit reference implementation is `pages/01_Studio.py`. It is intentionally a client of reusable logic in `studyforge/study_view.py` and `studyforge/pdf_viewer.py`; product logic must not migrate into Streamlit-specific code.
+
+## Rendered PDF model
+
+Native PDFs are rendered from the source file with PyMuPDF. Tutor LLM keeps two coordinate spaces explicit:
+
+- **render coordinates** — pixels in the client image/view;
+- **source coordinates** — PDF points used by the stored layout blocks and provenance engine.
+
+`studyforge.pdf_viewer.normalize_render_bbox` converts a client rectangle back to source coordinates. This prevents zoom, Retina scaling or client layout from changing the semantic selection.
+
+The API exposes:
+
+- `GET /workspaces/{workspace_id}/documents/{document_id}/render/{page}` — PNG page plus source/render dimensions in response headers;
+- `POST /documents/render-selection` — convert a render-space rectangle to source coordinates, recover intersecting blocks and map the result to chunks/citations.
+
+The current Streamlit prototype renders the real PDF but selects layout blocks explicitly instead of pretending to provide a reliable drag overlay. The future iPad client will send the native visual-selection rectangle directly to the same API contract.
 
 ## Study Session
 
@@ -43,7 +59,7 @@ A selected passage supports standardized actions:
 - Exercise
 - Prerequisites
 
-The client maps the visual selection back to document/page/chunks and creates a contextual tutor request with provenance. On iPad, the selected text and bounding box will come directly from the PDF viewer instead of a text field.
+The client maps the visual selection back to document/page/chunks and creates a contextual tutor request with provenance.
 
 ## Notes
 
@@ -56,6 +72,8 @@ Relevant endpoints include:
 - `GET /workspaces/{workspace_id}/study`
 - `POST /study/context-action`
 - `POST /documents/selection/map`
+- `GET /workspaces/{workspace_id}/documents/{document_id}/render/{page}`
+- `POST /documents/render-selection`
 - page and section endpoints
 - Tutor endpoints
 - notes and Study Session endpoints
