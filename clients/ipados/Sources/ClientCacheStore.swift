@@ -68,13 +68,13 @@ final class CachedDocumentFile {
 final class ClientCacheStore: ObservableObject {
     let container: ModelContainer
     private var context: ModelContext { container.mainContext }
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
 
     init(inMemory: Bool = false) {
         let config = ModelConfiguration(isStoredInMemoryOnly: inMemory)
         self.container = try! ModelContainer(for: CachedSyncEntity.self, CachedWorkspaceState.self, CachedDocumentFile.self, configurations: config)
     }
+
+    func save() throws { try context.save() }
 
     func state(for workspaceID: Int) -> CachedWorkspaceState {
         let descriptor = FetchDescriptor<CachedWorkspaceState>(predicate: #Predicate { $0.workspaceID == workspaceID })
