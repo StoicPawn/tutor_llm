@@ -1,4 +1,4 @@
-.PHONY: install models run api local demo server-up server-down server-models test check export-training
+.PHONY: install models run api local demo server-up server-down server-models server-token backup restore test check export-training
 
 install:
 	python -m venv .venv
@@ -20,15 +20,25 @@ api:
 demo:
 	. .venv/bin/activate && python scripts/create_demo_workspace.py
 
+server-token:
+	@python -c "import secrets; print(secrets.token_urlsafe(48))"
+
 server-up:
-	cd deploy && docker compose -f docker-compose.server.yml up -d --build
+	cd deploy && docker compose --env-file .env -f docker-compose.server.yml up -d --build
 
 server-down:
-	cd deploy && docker compose -f docker-compose.server.yml down
+	cd deploy && docker compose --env-file .env -f docker-compose.server.yml down
 
 server-models:
-	cd deploy && docker compose -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
-	cd deploy && docker compose -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
+	cd deploy && docker compose --env-file .env -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
+	cd deploy && docker compose --env-file .env -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
+
+backup:
+	. .venv/bin/activate && python scripts/backup.py
+
+restore:
+	@test -n "$(ARCHIVE)" || (echo "Usage: make restore ARCHIVE=/path/backup.zip" && exit 1)
+	. .venv/bin/activate && python scripts/restore.py "$(ARCHIVE)" --replace
 
 check:
 	. .venv/bin/activate && python -m compileall -q studyforge app.py tests scripts
