@@ -45,7 +45,6 @@ def _candidate_headings(page_text: str) -> list[tuple[int, str]]:
             out.append((depth, line)); continue
         if HEADING_PATTERNS[2].match(line) and len(line.split()) <= 12:
             out.append((2, line.title()))
-    # Preserve order while removing duplicates on the same page.
     seen=set(); unique=[]
     for item in out:
         key=item[1].casefold()
@@ -68,17 +67,20 @@ def rebuild_structure(workspace_id: int, document_id: int) -> list[dict]:
                 candidates.append({'level':level,'title':title,'start_page':int(p['page'])})
         if not candidates and pages:
             candidates=[{'level':1,'title':'Documento','start_page':int(pages[0]['page'])}]
-        stack=[]; created=[]
+        stack=[]
         last_page=int(pages[-1]['page']) if pages else None
         for i,item in enumerate(candidates):
             while stack and stack[-1][0] >= item['level']:
                 stack.pop()
             parent_id=stack[-1][1] if stack else None
-            end_page=(candidates[i+1]['start_page']-1) if i+1 < len(candidates) else last_page
+            if i+1 < len(candidates):
+                end_page=max(item['start_page'],candidates[i+1]['start_page']-1)
+            else:
+                end_page=max(item['start_page'],last_page) if last_page is not None else item['start_page']
             cur=con.execute('''INSERT INTO document_sections(document_id,parent_id,level,title,start_page,end_page,ordinal)
                                VALUES(?,?,?,?,?,?,?)''',
                             (document_id,parent_id,item['level'],item['title'],item['start_page'],end_page,i))
-            sid=int(cur.lastrowid); stack.append((item['level'],sid)); created.append(sid)
+            sid=int(cur.lastrowid); stack.append((item['level'],sid))
     return [dict(r) for r in list_sections(workspace_id,document_id)]
 
 
