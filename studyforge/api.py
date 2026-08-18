@@ -1,11 +1,12 @@
 from __future__ import annotations
 import os, tempfile
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from .config import settings
 from .inference import health as inference_health
 from .security import auth_middleware, validate_server_security
-from .db import list_documents, save_lesson, get_document_page
+from .db import list_documents, save_lesson, get_document_page, get_document
 from .pipeline import ingest_file
 from .teacher import answer_question, build_lesson, summarize, deepen, build_exercises, build_reasoning
 from .assessment import grade_answer
@@ -17,39 +18,30 @@ from .knowledge import rebuild_graph, graph
 from .repetition import due_reviews, upcoming_reviews, record_review
 from .interactive import start_exercise_session, session_state as exercise_state, submit_answer
 
-app = FastAPI(title='Tutor LLM API', version='0.10.0')
+app = FastAPI(title='Tutor LLM API', version='0.11.0')
 app.middleware('http')(auth_middleware)
 
 class WorkspaceIn(BaseModel):
-    name: str
-    description: str = ''
-    goal: str = ''
+    name: str; description: str = ''; goal: str = ''
 class TutorRequest(BaseModel):
     workspace_id: int; topic: str; document_ids: list[int] | None = None; epistemic_mode: str = 'Grounded'; lesson_mode: str = 'Approfondita'
-class CoverageIn(BaseModel):
-    workspace_id: int; goal: str; document_ids: list[int] | None = None
-class AssessmentIn(BaseModel):
-    workspace_id: int; topic: str; question: str; answer: str; document_ids: list[int] | None = None
-class GraphIn(BaseModel):
-    workspace_id: int; document_ids: list[int] | None = None; max_nodes: int = 40
-class ReviewIn(BaseModel):
-    workspace_id: int; concept: str; score: float
-class ExerciseStartIn(BaseModel):
-    workspace_id: int; topic: str; document_ids: list[int] | None = None; n: int = 6; epistemic_mode: str = 'Grounded'
+class CoverageIn(BaseModel): workspace_id: int; goal: str; document_ids: list[int] | None = None
+class AssessmentIn(BaseModel): workspace_id: int; topic: str; question: str; answer: str; document_ids: list[int] | None = None
+class GraphIn(BaseModel): workspace_id: int; document_ids: list[int] | None = None; max_nodes: int = 40
+class ReviewIn(BaseModel): workspace_id: int; concept: str; score: float
+class ExerciseStartIn(BaseModel): workspace_id: int; topic: str; document_ids: list[int] | None = None; n: int = 6; epistemic_mode: str = 'Grounded'
 class ExerciseAnswerIn(BaseModel): answer: str
 class SessionIn(BaseModel): workspace_id: int; learning_goal: str = ''
 class SessionContextIn(BaseModel):
     workspace_id: int; current_document_id: int | None = None; current_page: int | None = None; selected_text: str | None = None; current_concept: str | None = None; learning_goal: str | None = None; state: dict | None = None
-class NoteIn(BaseModel):
-    workspace_id: int; title: str; content: str = ''; kind: str = 'text'; document_id: int | None = None; page: int | None = None
-class NotePatch(BaseModel):
-    workspace_id: int; title: str | None = None; content: str | None = None
+class NoteIn(BaseModel): workspace_id: int; title: str; content: str = ''; kind: str = 'text'; document_id: int | None = None; page: int | None = None
+class NotePatch(BaseModel): workspace_id: int; title: str | None = None; content: str | None = None
 
 @app.on_event('startup')
 def startup(): validate_server_security(); ensure_default_workspace()
 @app.get('/health')
 def health():
-    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.10.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
+    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.11.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
 @app.get('/workspaces')
 def workspaces(): return [dict(r) for r in list_workspaces()]
 @app.post('/workspaces')
@@ -68,6 +60,11 @@ async def upload_document(workspace_id:int,file:UploadFile=File(...)):
     finally:
         try: os.unlink(path)
         except OSError: pass
+@app.get('/workspaces/{workspace_id}/documents/{document_id}/source')
+def document_source(workspace_id:int,document_id:int):
+    doc=get_document(workspace_id,document_id)
+    if not doc or not os.path.isfile(doc['path']): raise HTTPException(status_code=404,detail='Documento non trovato o file sorgente non disponibile.')
+    return FileResponse(doc['path'],filename=doc['name'],media_type='application/octet-stream')
 @app.get('/workspaces/{workspace_id}/documents/{document_id}/pages/{page}')
 def document_page(workspace_id:int,document_id:int,page:int):
     data=get_document_page(workspace_id,document_id,page)
