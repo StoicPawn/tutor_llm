@@ -47,6 +47,24 @@ def _ensure():
     with connect() as con: con.executescript(SCHEMA)
 
 
+def _decode_page(row)->dict:
+    d=dict(row); d['layers']=json.loads(d.pop('layers_json') or '[]'); return d
+
+
+def _page_payload(page:dict,notebook_id:int)->dict:
+    return {
+        'notebook_id':notebook_id,
+        'position':page.get('position'),
+        'title':page.get('title',''),
+        'width':page.get('width'),
+        'height':page.get('height'),
+        'background':page.get('background','blank'),
+        'layers':page.get('layers') or [],
+        'created_at':page.get('created_at'),
+        'updated_at':page.get('updated_at'),
+    }
+
+
 def _validate_layers(layers:list[dict])->list[dict]:
     if not isinstance(layers,list): raise ValueError('layers deve essere una lista.')
     if len(layers)>2000: raise ValueError('Troppi layer nella pagina.')
@@ -80,8 +98,12 @@ def create_notebook(workspace_id:int,title:str,description:str='',*,document_id:
                            VALUES(?,?,?,?,?,?,?,?)''',
                         (workspace_id,title[:300],description[:4000],document_id,max(1,int(page)) if page else None,(concept or '').strip()[:500] or None,now,now))
         notebook_id=int(cur.lastrowid)
-        con.execute('''INSERT INTO notebook_pages(notebook_id,position,title,width,height,background,layers_json,created_at,updated_at)
+        pcur=con.execute('''INSERT INTO notebook_pages(notebook_id,position,title,width,height,background,layers_json,created_at,updated_at)
                        VALUES(?,?,?,?,?,?,?,?,?)''',(notebook_id,1,'Pagina 1',1024.0,1365.0,'blank','[]',now,now))
+        prow=con.execute('SELECT * FROM notebook_pages WHERE id=?',(pcur.lastrowid,)).fetchone()
+    pdata=_decode_page(prow)
+    from .offline_sync import sync_server_upsert
+    sync_server_upsert(workspace_id,'notebook_page',int(pdata['id']),_page_payload(pdata,notebook_id))
     return notebook_id
 
 
@@ -101,10 +123,7 @@ def get_notebook(workspace_id:int,notebook_id:int)->dict|None:
         n=con.execute('SELECT * FROM study_notebooks WHERE id=? AND workspace_id=?',(notebook_id,workspace_id)).fetchone()
         if not n: return None
         pages=con.execute('SELECT * FROM notebook_pages WHERE notebook_id=? ORDER BY position',(notebook_id,)).fetchall()
-    out=dict(n); out['pages']=[]
-    for p in pages:
-        d=dict(p); d['layers']=json.loads(d.pop('layers_json') or '[]'); out['pages'].append(d)
-    return out
+    out=dict(n); out['pages']=[_decode_page(p) for p in pages]; return out
 
 
 def add_page(workspace_id:int,notebook_id:int,*,title:str='',background:str='blank',width:float=1024,height:float=1365)->dict:
@@ -119,7 +138,10 @@ def add_page(workspace_id:int,notebook_id:int,*,title:str='',background:str='bla
                            VALUES(?,?,?,?,?,?,?,?,?)''',(notebook_id,pos,(title or f'Pagina {pos}')[:300],float(width),float(height),background,'[]',now,now))
         con.execute('UPDATE study_notebooks SET updated_at=? WHERE id=?',(now,notebook_id))
         row=con.execute('SELECT * FROM notebook_pages WHERE id=?',(cur.lastrowid,)).fetchone()
-    d=dict(row); d['layers']=json.loads(d.pop('layers_json')); return d
+    data=_decode_page(row)
+    from .offline_sync import sync_server_upsert
+    sync_server_upsert(workspace_id,'notebook_page',int(data['id']),_page_payload(data,notebook_id))
+    return data
 
 
 def save_page(workspace_id:int,notebook_id:int,page_id:int,*,layers:list[dict],title:str|None=None,background:str|None=None)->dict:
@@ -136,9 +158,21 @@ def save_page(workspace_id:int,notebook_id:int,page_id:int,*,layers:list[dict],t
         if cur.rowcount!=1: raise ValueError('Pagina quaderno non trovata.')
         con.execute('UPDATE study_notebooks SET updated_at=? WHERE id=?',(_now(),notebook_id))
         row=con.execute('SELECT * FROM notebook_pages WHERE id=?',(page_id,)).fetchone()
-    d=dict(row); d['layers']=json.loads(d.pop('layers_json')); return d
+    data=_decode_page(row)
+    from .offline_sync import sync_server_upsert
+    sync_server_upsert(workspace_id,'notebook_page',page_id,_page_payload(data,notebook_id))
+    return data
 
 
 def delete_notebook(workspace_id:int,notebook_id:int):
     _ensure()
-    with connect() as con: con.execute('DELETE FROM study_notebooks WHERE id=? AND workspace_id=?',(notebook_id,workspace_id))
+    with connect() as con:
+        n=con.execute('SELECT 1 FROM study_notebooks WHERE id=? AND workspace_id=?',(notebook_id,workspace_id)).fetchone()
+        if not n: return False
+        rows=con.execute('SELECT * FROM notebook_pages WHERE notebook_id=? ORDER BY position',(notebook_id,)).fetchall()
+        pages=[_decode_page(r) for r in rows]
+        con.execute('DELETE FROM study_notebooks WHERE id=? AND workspace_id=?',(notebook_id,workspace_id))
+    from .offline_sync import sync_server_delete
+    for page in pages:
+        sync_server_delete(workspace_id,'notebook_page',int(page['id']),_page_payload(page,notebook_id))
+    return True
