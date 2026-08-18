@@ -4,7 +4,7 @@ from pathlib import Path
 from .config import settings
 from .db import add_document, add_chunks, add_pages
 from .ingest import extract, chunk_pages
-from .ollama_client import embed
+from .inference import embed
 from .source_map import store_chunk_spans
 from .structure import rebuild_structure
 
