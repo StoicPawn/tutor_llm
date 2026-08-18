@@ -132,6 +132,8 @@ Questo permette in futuro di usare un runtime iPad-native, un server GPU più po
 - Next Best Activity planner
 - parsing di sezioni/capitoli
 - mapping selezione PDF → blocchi/chunk/citazione
+- viewer PDF reale con coordinate render/source separate
+- annotazioni persistenti su PDF: highlight, bookmark, commenti e ink vettoriale
 - note personali collegate a documento e pagina
 - Study Session persistenti con documento/pagina/testo selezionato/concetto corrente
 - PDF page-aware con bounding box dei blocchi nativi
@@ -213,7 +215,7 @@ PC locale -> backup -> Tutor Server -> restore -> download modelli
 
 La logica importante vive nel package `studyforge/`; Streamlit è soltanto un client. È disponibile anche `studyforge.client.TutorClient` come client HTTP autenticato di riferimento. L'iPad implementerà lo stesso contratto API.
 
-Per i PDF nativi Tutor LLM conserva pagina, testo, dimensioni, bounding box e mapping verso chunk. Una Study Session conserva:
+Per i PDF nativi Tutor LLM conserva pagina, testo, dimensioni, bounding box e mapping verso chunk. Annotazioni e ink usano coordinate PDF sorgente, quindi restano stabili a qualunque zoom. Una Study Session conserva:
 
 ```text
 workspace
@@ -225,7 +227,9 @@ workspace
 └── state_json
 ```
 
-Questo permette una futura UI iPad con PDF, selezione del passaggio, Tutor e foglio Apple Pencil senza duplicare il motore.
+Il layer `ink` salva stroke vettoriali separati dalle fonti autorevoli: il futuro client iPad potrà usare Apple Pencil senza trasformare automaticamente appunti o schizzi in conoscenza RAG.
+
+Dettagli dell'esperienza Studio: `docs/study_experience.md`.
 
 ## Demo workspace
 
@@ -243,7 +247,7 @@ crea localmente `Matematica Demo`, una fixture end-to-end separata dai dati real
 make check
 ```
 
-GitHub Actions esegue compilazione e test. La suite comprende isolamento workspace, page mapping, scheduler, backup, sicurezza server e contratto API.
+GitHub Actions esegue compilazione e test. La suite comprende isolamento workspace, page mapping, annotazioni/ink, scheduler, backup, sicurezza server e contratto API.
 
 ## Privacy e accesso remoto
 
@@ -263,6 +267,8 @@ GitHub Actions esegue compilazione e test. La suite comprende isolamento workspa
 - [x] spaced repetition, flashcard e review queue
 - [x] esercizi interattivi e grading
 - [x] PDF page-aware e source mapping
+- [x] viewer PDF reale
+- [x] annotazioni persistenti e ink layer Pencil-ready
 - [x] Next Best Activity planner
 - [x] API-first
 - [x] profili architetturali `local` e `server`
@@ -270,6 +276,7 @@ GitHub Actions esegue compilazione e test. La suite comprende isolamento workspa
 - [x] autenticazione API server
 - [x] backup/export/import della conoscenza personale
 - [x] migrazione local → server con rilocalizzazione dei documenti
+- [ ] fogli bianchi/canvas persistenti collegabili a pagine e concetti
 - [ ] installer desktop automatico per Windows/macOS/Linux
 - [ ] gestione dispositivi/token multipli e revoca
 - [ ] GPU-specific server profiles
