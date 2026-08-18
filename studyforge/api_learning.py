@@ -6,6 +6,7 @@ from .source_map import map_selection
 from .flashcards import generate_flashcards, list_flashcards, review_flashcard, archive_flashcard
 from .review_queue import review_queue
 from .planner import next_best_activity
+from .study_view import study_workspace_state, selection_context, contextual_tutor_request, set_reading_context
 
 router=APIRouter()
 
@@ -19,6 +20,16 @@ class SelectionIn(BaseModel):
     page:int
     selected_text:str=''
     bbox:list[float]|None=None
+
+class ContextActionIn(BaseModel):
+    workspace_id:int
+    document_id:int
+    page:int
+    action:str='explain'
+    selected_text:str=''
+    bbox:list[float]|None=None
+    user_instruction:str=''
+    session_id:int|None=None
 
 class FlashcardsIn(BaseModel):
     workspace_id:int
@@ -48,6 +59,24 @@ def section(workspace_id:int,document_id:int,section_id:int):
 @router.post('/documents/selection/map')
 def selection_map(payload:SelectionIn):
     try: return map_selection(payload.workspace_id,payload.document_id,payload.page,payload.selected_text,payload.bbox)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.get('/workspaces/{workspace_id}/study')
+def study_state(workspace_id:int,session_id:int|None=None,document_id:int|None=None,page:int|None=None):
+    try: return study_workspace_state(workspace_id,session_id,document_id,page)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.post('/study/context-action')
+def context_action(payload:ContextActionIn):
+    try:
+        mapped=selection_context(payload.workspace_id,payload.document_id,payload.page,payload.selected_text,payload.bbox)
+        if payload.session_id is not None:
+            set_reading_context(payload.session_id,payload.workspace_id,payload.document_id,payload.page,mapped.get('selected_text',''))
+        return {
+            'selection':mapped,
+            'prompt':contextual_tutor_request(payload.action,mapped,payload.user_instruction),
+            'action':payload.action,
+        }
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.post('/flashcards/generate')
