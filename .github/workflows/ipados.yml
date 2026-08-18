@@ -1,0 +1,32 @@
+name: iPadOS client
+
+on:
+  push:
+    paths:
+      - 'clients/ipados/**'
+      - '.github/workflows/ipados.yml'
+  pull_request:
+    paths:
+      - 'clients/ipados/**'
+      - '.github/workflows/ipados.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: clients/ipados
+        run: xcodegen generate
+      - name: Build for iPad Simulator
+        working-directory: clients/ipados
+        run: |
+          xcodebuild \
+            -project TutorLLM.xcodeproj \
+            -scheme TutorLLM \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
