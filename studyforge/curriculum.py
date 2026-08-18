@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS curriculum_nodes (
  status TEXT NOT NULL DEFAULT 'todo', FOREIGN KEY(curriculum_id) REFERENCES curricula(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_curriculum_nodes ON curriculum_nodes(curriculum_id,position);
-CREATE INDEX IF NOT EXISTS idx_curricula_workspace ON curricula(workspace_id,id);
 '''
 
 
@@ -34,6 +33,7 @@ def _ensure():
             con.execute('ALTER TABLE curricula ADD COLUMN workspace_id INTEGER')
         default=int(con.execute('SELECT id FROM workspaces ORDER BY id LIMIT 1').fetchone()['id'])
         con.execute('UPDATE curricula SET workspace_id=? WHERE workspace_id IS NULL',(default,))
+        con.execute('CREATE INDEX IF NOT EXISTS idx_curricula_workspace ON curricula(workspace_id,id)')
 
 
 def _json_object(text:str)->dict:
