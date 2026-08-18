@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS chunks (
   FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
-CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id);
 CREATE TABLE IF NOT EXISTS lessons (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER,
@@ -44,7 +43,6 @@ CREATE TABLE IF NOT EXISTS lessons (
   feedback TEXT,
   FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_lessons_workspace ON lessons(workspace_id);
 CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
@@ -58,7 +56,6 @@ CREATE TABLE IF NOT EXISTS notes (
   FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE SET NULL
 );
-CREATE INDEX IF NOT EXISTS idx_notes_workspace ON notes(workspace_id);
 CREATE TABLE IF NOT EXISTS study_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
@@ -74,7 +71,6 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   FOREIGN KEY(current_document_id) REFERENCES documents(id) ON DELETE SET NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON study_sessions(workspace_id);
 """
 
 
@@ -88,7 +84,6 @@ def _ensure_column(con: sqlite3.Connection, table: str, name: str, ddl: str):
 
 
 def _migrate(con: sqlite3.Connection):
-    # Backwards-compatible migration from the pre-workspace database.
     now = datetime.now(timezone.utc).isoformat()
     row = con.execute("SELECT id FROM workspaces ORDER BY id LIMIT 1").fetchone()
     if row:
@@ -104,6 +99,11 @@ def _migrate(con: sqlite3.Connection):
     _ensure_column(con, "lessons", "epistemic_mode", "TEXT NOT NULL DEFAULT 'Grounded'")
     con.execute("UPDATE documents SET workspace_id=? WHERE workspace_id IS NULL", (default_id,))
     con.execute("UPDATE lessons SET workspace_id=? WHERE workspace_id IS NULL", (default_id,))
+    # Create indexes only after legacy tables have been upgraded.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_lessons_workspace ON lessons(workspace_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_notes_workspace ON notes(workspace_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON study_sessions(workspace_id)")
 
 
 @contextmanager
