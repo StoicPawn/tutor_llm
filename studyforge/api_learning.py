@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from .structure import rebuild_structure, list_sections, section_context
 from .source_map import map_selection
@@ -7,6 +7,7 @@ from .flashcards import generate_flashcards, list_flashcards, review_flashcard, 
 from .review_queue import review_queue
 from .planner import next_best_activity
 from .study_view import study_workspace_state, selection_context, contextual_tutor_request, set_reading_context
+from .pdf_viewer import render_pdf_page, normalize_render_bbox, blocks_in_bbox
 
 router=APIRouter()
 
@@ -20,6 +21,16 @@ class SelectionIn(BaseModel):
     page:int
     selected_text:str=''
     bbox:list[float]|None=None
+
+class RenderSelectionIn(BaseModel):
+    workspace_id:int
+    document_id:int
+    page:int
+    bbox:list[float]
+    render_width:float
+    render_height:float
+    source_width:float
+    source_height:float
 
 class ContextActionIn(BaseModel):
     workspace_id:int
@@ -59,6 +70,29 @@ def section(workspace_id:int,document_id:int,section_id:int):
 @router.post('/documents/selection/map')
 def selection_map(payload:SelectionIn):
     try: return map_selection(payload.workspace_id,payload.document_id,payload.page,payload.selected_text,payload.bbox)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.get('/workspaces/{workspace_id}/documents/{document_id}/render/{page}')
+def render_page(workspace_id:int,document_id:int,page:int,scale:float=1.6):
+    try:
+        data=render_pdf_page(workspace_id,document_id,page,scale)
+        headers={
+            'X-Page-Count':str(data['page_count']),
+            'X-Source-Width':str(data['source_width']),
+            'X-Source-Height':str(data['source_height']),
+            'X-Render-Width':str(data['render_width']),
+            'X-Render-Height':str(data['render_height']),
+        }
+        return Response(content=data['png'],media_type='image/png',headers=headers)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.post('/documents/render-selection')
+def render_selection(payload:RenderSelectionIn):
+    try:
+        source_bbox=normalize_render_bbox(payload.bbox,payload.render_width,payload.render_height,payload.source_width,payload.source_height)
+        selected=blocks_in_bbox(payload.workspace_id,payload.document_id,payload.page,source_bbox)
+        mapped=map_selection(payload.workspace_id,payload.document_id,payload.page,selected.get('text',''),source_bbox)
+        return {'source_bbox':source_bbox,'selection':selected,'mapped':mapped}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @router.get('/workspaces/{workspace_id}/study')
