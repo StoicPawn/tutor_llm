@@ -36,13 +36,13 @@ def _json(text:str)->dict:
 
 
 def generate_flashcards(workspace_id:int, topic:str, document_ids:list[int]|None=None, n:int=8)->list[dict]:
-    _ensure(); _,blocks,compact=_context(workspace_id,topic,document_ids,min(10,max(5,n)) )
+    _ensure(); _,blocks,compact=_context(workspace_id,topic,document_ids,min(10,max(5,n)))
     prompt=f'''Crea {n} flashcard di active recall sul tema "{topic}" usando soltanto il materiale.
 Restituisci SOLO JSON valido: {{"cards":[{{"concept":"...","question":"...","answer":"...","sources":[1,2]}}]}}.
 Le domande devono testare comprensione, relazioni e applicazione, non solo definizioni. Le risposte devono essere concise.
 MATERIALE:\n{chr(10).join(blocks)}'''
     data=_json(chat([{'role':'system','content':'Sei un tutor rigoroso. Produci solo JSON.'},{'role':'user','content':prompt}],temperature=.08))
-    cards=[]; now=datetime.now(timezone.utc).isoformat()
+    cards=[]; concepts=[]; now=datetime.now(timezone.utc).isoformat()
     with connect() as con:
         for raw in data.get('cards',[])[:n]:
             q=str(raw.get('question','')).strip(); a=str(raw.get('answer','')).strip(); concept=str(raw.get('concept') or topic).strip()[:180]
@@ -51,8 +51,9 @@ MATERIALE:\n{chr(10).join(blocks)}'''
             src=[compact[i-1] for i in nums]
             cur=con.execute('INSERT INTO flashcards(workspace_id,concept,question,answer,sources_json,created_at) VALUES(?,?,?,?,?,?)',
                             (workspace_id,concept,q,a,json.dumps(src,ensure_ascii=False),now))
-            fid=int(cur.lastrowid); cards.append({'id':fid,'concept':concept,'question':q,'answer':a,'sources':src})
-            schedule_concept(workspace_id,concept)
+            fid=int(cur.lastrowid); cards.append({'id':fid,'concept':concept,'question':q,'answer':a,'sources':src}); concepts.append(concept)
+    for concept in dict.fromkeys(concepts):
+        schedule_concept(workspace_id,concept)
     return cards
 
 
