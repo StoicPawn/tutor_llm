@@ -6,4 +6,5 @@ data/*.db
 data/uploads/*
 !data/uploads/.gitkeep
 training/output/
+deploy/backups/
 .env
