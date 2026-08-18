@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, uuid
 from datetime import datetime, timezone
-from .db import connect
+from .db import connect, document_belongs_to_workspace
 
 SCHEMA='''
 CREATE TABLE IF NOT EXISTS sync_objects (
@@ -92,16 +92,19 @@ def _materialize(workspace_id:int,entity_type:str,server_id:int|None,payload:dic
             if server_id is not None:
                 with connect() as con: con.execute('DELETE FROM notes WHERE id=? AND workspace_id=?',(server_id,workspace_id))
             return server_id
+        document_id=payload.get('document_id')
+        if document_id is not None and not document_belongs_to_workspace(int(document_id),workspace_id):
+            raise ValueError('Documento fuori workspace nel payload note.')
         with connect() as con:
             if server_id is not None and con.execute('SELECT 1 FROM notes WHERE id=? AND workspace_id=?',(server_id,workspace_id)).fetchone():
                 con.execute('UPDATE notes SET title=?,content=?,kind=?,document_id=?,page=?,updated_at=? WHERE id=? AND workspace_id=?',
-                            ((payload.get('title') or 'Nota senza titolo')[:240],payload.get('content',''),(payload.get('kind') or 'text')[:40],payload.get('document_id'),payload.get('page'),now,server_id,workspace_id))
+                            ((payload.get('title') or 'Nota senza titolo')[:240],payload.get('content',''),(payload.get('kind') or 'text')[:40],document_id,payload.get('page'),now,server_id,workspace_id))
                 return server_id
             cur=con.execute('INSERT INTO notes(workspace_id,title,content,kind,document_id,page,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
-                            (workspace_id,(payload.get('title') or 'Nota senza titolo')[:240],payload.get('content',''),(payload.get('kind') or 'text')[:40],payload.get('document_id'),payload.get('page'),payload.get('created_at') or now,now))
+                            (workspace_id,(payload.get('title') or 'Nota senza titolo')[:240],payload.get('content',''),(payload.get('kind') or 'text')[:40],document_id,payload.get('page'),payload.get('created_at') or now,now))
             return int(cur.lastrowid)
     if entity_type=='annotation':
-        from .annotations import _ensure as ensure_annotations
+        from .annotations import _ensure as ensure_annotations, ALLOWED_KINDS
         ensure_annotations()
         if deleted:
             if server_id is not None:
@@ -109,18 +112,23 @@ def _materialize(workspace_id:int,entity_type:str,server_id:int|None,payload:dic
             return server_id
         document_id=payload.get('document_id')
         if document_id is None: raise ValueError('document_id obbligatorio per annotation sync.')
-        bbox=payload.get('bbox'); bbox_json=json.dumps(bbox) if bbox is not None else None
+        if not document_belongs_to_workspace(int(document_id),workspace_id): raise ValueError('Documento fuori workspace nel payload annotation.')
+        kind=(payload.get('kind') or 'comment').strip().lower()
+        if kind not in ALLOWED_KINDS: raise ValueError('Tipo annotazione non supportato.')
+        bbox=payload.get('bbox')
+        if bbox is not None and len(bbox)!=4: raise ValueError('bbox non valido.')
+        bbox_json=json.dumps([float(x) for x in bbox]) if bbox is not None else None
         payload_json=json.dumps(payload.get('payload') or {},ensure_ascii=False)
         with connect() as con:
             if server_id is not None and con.execute('SELECT 1 FROM document_annotations WHERE id=? AND workspace_id=?',(server_id,workspace_id)).fetchone():
                 con.execute('UPDATE document_annotations SET document_id=?,page=?,kind=?,bbox_json=?,text=?,payload_json=?,updated_at=? WHERE id=? AND workspace_id=?',
-                            (document_id,max(1,int(payload.get('page') or 1)),payload.get('kind') or 'comment',bbox_json,payload.get('text','')[:12000],payload_json,now,server_id,workspace_id))
+                            (document_id,max(1,int(payload.get('page') or 1)),kind,bbox_json,payload.get('text','')[:12000],payload_json,now,server_id,workspace_id))
                 return server_id
             cur=con.execute('INSERT INTO document_annotations(workspace_id,document_id,page,kind,bbox_json,text,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
-                            (workspace_id,document_id,max(1,int(payload.get('page') or 1)),payload.get('kind') or 'comment',bbox_json,payload.get('text','')[:12000],payload_json,payload.get('created_at') or now,now))
+                            (workspace_id,document_id,max(1,int(payload.get('page') or 1)),kind,bbox_json,payload.get('text','')[:12000],payload_json,payload.get('created_at') or now,now))
             return int(cur.lastrowid)
     if entity_type=='notebook_page':
-        from .notebooks import _ensure as ensure_notebooks, _validate_layers
+        from .notebooks import _ensure as ensure_notebooks, _validate_layers, ALLOWED_BACKGROUNDS
         ensure_notebooks()
         if deleted:
             if server_id is not None:
@@ -132,13 +140,22 @@ def _materialize(workspace_id:int,entity_type:str,server_id:int|None,payload:dic
         if notebook_id is None: raise ValueError('notebook_id obbligatorio per notebook_page sync.')
         layers=_validate_layers(payload.get('layers') or [])
         background=(payload.get('background') or 'blank').strip().lower()
+        if background not in ALLOWED_BACKGROUNDS: raise ValueError('Sfondo non supportato.')
         with connect() as con:
             if not con.execute('SELECT 1 FROM study_notebooks WHERE id=? AND workspace_id=?',(notebook_id,workspace_id)).fetchone(): raise ValueError('Quaderno fuori workspace o inesistente.')
-            if server_id is not None and con.execute('SELECT 1 FROM notebook_pages WHERE id=? AND notebook_id=?',(server_id,notebook_id)).fetchone():
+            existing=None
+            if server_id is not None:
+                existing=con.execute('SELECT * FROM notebook_pages WHERE id=? AND notebook_id=?',(server_id,notebook_id)).fetchone()
+            if existing:
+                desired=int(payload.get('position') or existing['position'])
+                occupied=con.execute('SELECT 1 FROM notebook_pages WHERE notebook_id=? AND position=? AND id<>?',(notebook_id,desired,server_id)).fetchone()
+                position=int(existing['position']) if occupied else desired
                 con.execute('UPDATE notebook_pages SET position=?,title=?,width=?,height=?,background=?,layers_json=?,updated_at=? WHERE id=?',
-                            (int(payload.get('position') or 1),(payload.get('title') or '')[:300],float(payload.get('width') or 1024),float(payload.get('height') or 1365),background,json.dumps(layers,ensure_ascii=False),now,server_id))
+                            (position,(payload.get('title') or '')[:300],float(payload.get('width') or 1024),float(payload.get('height') or 1365),background,json.dumps(layers,ensure_ascii=False),now,server_id))
                 con.execute('UPDATE study_notebooks SET updated_at=? WHERE id=?',(now,notebook_id)); return server_id
-            position=int(payload.get('position') or con.execute('SELECT COALESCE(MAX(position),0)+1 n FROM notebook_pages WHERE notebook_id=?',(notebook_id,)).fetchone()['n'])
+            next_pos=int(con.execute('SELECT COALESCE(MAX(position),0)+1 n FROM notebook_pages WHERE notebook_id=?',(notebook_id,)).fetchone()['n'])
+            requested=int(payload.get('position') or next_pos)
+            position=next_pos if con.execute('SELECT 1 FROM notebook_pages WHERE notebook_id=? AND position=?',(notebook_id,requested)).fetchone() else requested
             cur=con.execute('INSERT INTO notebook_pages(notebook_id,position,title,width,height,background,layers_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
                             (notebook_id,position,(payload.get('title') or f'Pagina {position}')[:300],float(payload.get('width') or 1024),float(payload.get('height') or 1365),background,json.dumps(layers,ensure_ascii=False),payload.get('created_at') or now,now))
             con.execute('UPDATE study_notebooks SET updated_at=? WHERE id=?',(now,notebook_id)); return int(cur.lastrowid)
