@@ -12,12 +12,12 @@ from .assessment import grade_answer
 from .coverage import analyze_coverage
 from .workspaces import create_workspace, list_workspaces, get_workspace, ensure_default_workspace
 from .sessions import start_session, update_session, get_session, end_session
-from .notes import create_note, list_notes
+from .notes import create_note, list_notes, update_note, delete_note
 from .knowledge import rebuild_graph, graph
 from .repetition import due_reviews, upcoming_reviews, record_review
 from .interactive import start_exercise_session, session_state as exercise_state, submit_answer
 
-app = FastAPI(title='Tutor LLM API', version='0.9.0')
+app = FastAPI(title='Tutor LLM API', version='0.10.0')
 app.middleware('http')(auth_middleware)
 
 class WorkspaceIn(BaseModel):
@@ -42,12 +42,14 @@ class SessionContextIn(BaseModel):
     workspace_id: int; current_document_id: int | None = None; current_page: int | None = None; selected_text: str | None = None; current_concept: str | None = None; learning_goal: str | None = None; state: dict | None = None
 class NoteIn(BaseModel):
     workspace_id: int; title: str; content: str = ''; kind: str = 'text'; document_id: int | None = None; page: int | None = None
+class NotePatch(BaseModel):
+    workspace_id: int; title: str | None = None; content: str | None = None
 
 @app.on_event('startup')
 def startup(): validate_server_security(); ensure_default_workspace()
 @app.get('/health')
 def health():
-    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.9.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
+    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.10.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
 @app.get('/workspaces')
 def workspaces(): return [dict(r) for r in list_workspaces()]
 @app.post('/workspaces')
@@ -136,6 +138,12 @@ def close_session(session_id:int,workspace_id:int): end_session(session_id,works
 def notes(workspace_id:int): return [dict(r) for r in list_notes(workspace_id)]
 @app.post('/notes')
 def new_note(payload:NoteIn): return {'id':create_note(payload.workspace_id,payload.title,payload.content,kind=payload.kind,document_id=payload.document_id,page=payload.page)}
+@app.patch('/notes/{note_id}')
+def patch_note(note_id:int,payload:NotePatch):
+    try: return update_note(payload.workspace_id,note_id,title=payload.title,content=payload.content)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+@app.delete('/workspaces/{workspace_id}/notes/{note_id}')
+def remove_note(workspace_id:int,note_id:int): return {'ok':delete_note(workspace_id,note_id)}
 
 from .api_learning import router as learning_router
 from .api_devices import router as devices_router
