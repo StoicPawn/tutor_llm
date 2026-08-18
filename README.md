@@ -71,17 +71,25 @@ storage     InferenceProvider
 
 Il server è la **source of truth** per biblioteca, workspaces, embeddings, mastery, knowledge graph, note e cronologia. I client non devono installare Llama o mantenere copie separate dello Student Model.
 
-È disponibile un primo profilo Docker Compose:
+È disponibile un profilo Docker Compose. La modalità server richiede un token applicativo:
 
 ```bash
 cd deploy
 cp .env.server.example .env
-docker compose -f docker-compose.server.yml up -d --build
-docker compose -f docker-compose.server.yml exec ollama ollama pull qwen3:4b
-docker compose -f docker-compose.server.yml exec ollama ollama pull embeddinggemma
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+# inserire il valore generato come API_TOKEN nel file .env
+cd ..
+make server-up
+make server-models
 ```
 
-Per sicurezza, il Compose pubblica Tutor LLM solo su `127.0.0.1` e **non espone Ollama**. Per accesso fuori casa va usata una rete privata/tunnel o reverse proxy autenticato; non va pubblicata direttamente su Internet la porta dell'API.
+Ogni richiesta operativa remota usa:
+
+```text
+Authorization: Bearer <API_TOKEN>
+```
+
+Per sicurezza, il Compose pubblica Tutor LLM solo su `127.0.0.1` e **non espone Ollama**. Per accesso fuori casa va usata una rete privata/tunnel o reverse proxy autenticato; non va pubblicata direttamente su Internet la porta dell'API. Il Bearer token costituisce un ulteriore livello applicativo anche all'interno della rete privata.
 
 Dettagli: `docs/deployment.md`.
 
@@ -128,6 +136,8 @@ Questo permette in futuro di usare un runtime iPad-native, un server GPU più po
 - Study Session persistenti con documento/pagina/testo selezionato/concetto corrente
 - PDF page-aware con bounding box dei blocchi nativi
 - API FastAPI per client web, desktop e futuro iPadOS
+- autenticazione Bearer obbligatoria nel profilo server
+- backup/restore portabile di database + documenti, con rilocalizzazione automatica dei path
 - export dataset e LoRA/SFT opzionale per adattare il comportamento didattico
 
 ## Architettura
@@ -158,14 +168,50 @@ export CHAT_MODEL=qwen3:4b
 export EMBEDDING_MODEL=embeddinggemma
 ```
 
+Profilo server aggiunge obbligatoriamente:
+
+```bash
+export DEPLOY_MODE=server
+export API_TOKEN=<segreto-lungo-casuale>
+```
+
 Template completi:
 
 - `deploy/.env.local.example`
 - `deploy/.env.server.example`
 
+## Backup e migrazione
+
+I pesi dei modelli non vengono inclusi nei backup: vengono riscaricati sulla macchina destinazione. La conoscenza personale invece è portabile.
+
+Backup locale:
+
+```bash
+make backup
+```
+
+Restore locale, con Tutor LLM fermo:
+
+```bash
+make restore ARCHIVE=/path/to/backup.zip
+```
+
+Sul server Docker:
+
+```bash
+make server-backup
+make server-restore ARCHIVE=nome-file.zip
+```
+
+I backup server vengono scritti in `deploy/backups/`. Questo rende supportato il percorso:
+
+```text
+PC locale -> backup -> Tutor Server -> restore -> download modelli
+```
+
 ## API e futura app iPad
 
-La logica importante vive nel package `studyforge/`; Streamlit è soltanto un client. L'iPad userà la stessa API del server/desktop.
+La logica importante vive nel package `studyforge/`; Streamlit è soltanto un client. È disponibile anche `studyforge.client.TutorClient` come client HTTP autenticato di riferimento. L'iPad implementerà lo stesso contratto API.
 
 Per i PDF nativi Tutor LLM conserva pagina, testo, dimensioni, bounding box e mapping verso chunk. Una Study Session conserva:
 
@@ -197,7 +243,7 @@ crea localmente `Matematica Demo`, una fixture end-to-end separata dai dati real
 make check
 ```
 
-GitHub Actions esegue compilazione e test. La suite comprende isolamento workspace, page mapping, scheduler e contratto API.
+GitHub Actions esegue compilazione e test. La suite comprende isolamento workspace, page mapping, scheduler, backup, sicurezza server e contratto API.
 
 ## Privacy e accesso remoto
 
@@ -205,7 +251,9 @@ GitHub Actions esegue compilazione e test. La suite comprende isolamento workspa
 - in modalità local possono restare interamente sul PC;
 - in modalità server restano sul server personale;
 - Ollama non deve essere esposto direttamente a Internet;
-- il server remoto deve essere raggiunto tramite accesso privato cifrato/autenticato.
+- l'API server richiede Bearer token;
+- il server remoto deve essere raggiunto tramite accesso privato cifrato/autenticato;
+- i modelli LLM non vengono inseriti nei backup né nella repository.
 
 ## Roadmap principale
 
@@ -218,10 +266,12 @@ GitHub Actions esegue compilazione e test. La suite comprende isolamento workspa
 - [x] Next Best Activity planner
 - [x] API-first
 - [x] profili architetturali `local` e `server`
-- [x] primo Docker Compose server
+- [x] Docker Compose server
+- [x] autenticazione API server
+- [x] backup/export/import della conoscenza personale
+- [x] migrazione local → server con rilocalizzazione dei documenti
 - [ ] installer desktop automatico per Windows/macOS/Linux
-- [ ] autenticazione API e gestione dispositivi
-- [ ] backup/export/import completo della conoscenza personale
+- [ ] gestione dispositivi/token multipli e revoca
 - [ ] GPU-specific server profiles
 - [ ] OCR layout-aware per formule, tabelle e figure
 - [ ] client iPadOS con PDF, Apple Pencil e split view Tutor/Notes
