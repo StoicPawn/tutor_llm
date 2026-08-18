@@ -6,6 +6,7 @@ from .db import list_documents, save_lesson
 from .pipeline import ingest_file
 from .teacher import answer_question, build_lesson, summarize, deepen, build_exercises, build_reasoning
 from .assessment import grade_answer
+from .coverage import analyze_coverage
 from .workspaces import create_workspace, list_workspaces, get_workspace, ensure_default_workspace
 from .sessions import start_session, update_session, get_session, end_session
 from .notes import create_note, list_notes
@@ -25,6 +26,12 @@ class TutorRequest(BaseModel):
     document_ids: list[int] | None = None
     epistemic_mode: str = "Grounded"
     lesson_mode: str = "Approfondita"
+
+
+class CoverageIn(BaseModel):
+    workspace_id: int
+    goal: str
+    document_ids: list[int] | None = None
 
 
 class AssessmentIn(BaseModel):
@@ -104,6 +111,14 @@ async def upload_document(workspace_id: int, file: UploadFile = File(...)):
             os.unlink(path)
         except OSError:
             pass
+
+
+@app.post("/workspaces/coverage")
+def coverage(payload: CoverageIn):
+    try:
+        return analyze_coverage(payload.workspace_id, payload.goal, payload.document_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/tutor/ask")
