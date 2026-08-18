@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .config import settings
-from .ollama_client import chat
+from .inference import chat
 from .retrieval import retrieve
 from .student import mastery_for
 
