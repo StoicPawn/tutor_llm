@@ -23,7 +23,16 @@ struct RootView: View {
                                     Button {
                                         state.selectedDocument = document
                                     } label: {
-                                        Label(document.name, systemImage: state.selectedDocument?.id == document.id ? "doc.fill" : "doc")
+                                        HStack {
+                                            Label(document.name, systemImage: state.selectedDocument?.id == document.id ? "doc.fill" : "doc")
+                                            Spacer()
+                                            if let workspace = state.selectedWorkspace,
+                                               state.cache.cachedDocument(workspaceID: workspace.id, documentID: document.id) != nil {
+                                                Image(systemName: "arrow.down.circle.fill")
+                                                    .foregroundStyle(.secondary)
+                                                    .help("Disponibile offline")
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -77,6 +86,14 @@ struct ConnectionView: View {
                     }
                     .disabled(url.isEmpty || state.isLoading)
                     if state.isLoading { ProgressView() }
+                }
+                if let lastSyncAt = state.lastSyncAt {
+                    Section("Sincronizzazione") {
+                        LabeledContent("Ultimo sync", value: lastSyncAt.formatted(date: .abbreviated, time: .shortened))
+                        if state.conflictCount > 0 {
+                            LabeledContent("Conflitti", value: "\(state.conflictCount)")
+                        }
+                    }
                 }
                 if state.isConfigured {
                     Section {
