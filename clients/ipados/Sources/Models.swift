@@ -63,6 +63,38 @@ struct TutorAskRequest: Codable {
     let epistemic_mode: String
 }
 
+struct NotebookSummary: Codable, Identifiable {
+    let id: Int
+    let workspace_id: Int
+    let title: String
+    let description: String?
+    let linked_document_id: Int?
+    let linked_page: Int?
+    let linked_concept: String?
+    let page_count: Int?
+}
+
+struct NotebookPage: Codable, Identifiable {
+    let id: Int
+    let notebook_id: Int
+    let position: Int
+    let title: String
+    let width: Double
+    let height: Double
+    let background: String
+    let layers: [JSONValue]
+}
+
+struct NotebookDetail: Codable, Identifiable {
+    let id: Int
+    let workspace_id: Int
+    let title: String
+    let linked_document_id: Int?
+    let linked_page: Int?
+    let linked_concept: String?
+    let pages: [NotebookPage]
+}
+
 enum JSONValue: Codable {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
 
