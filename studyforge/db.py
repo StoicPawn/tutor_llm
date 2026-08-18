@@ -20,6 +20,18 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TEXT NOT NULL,
   FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS document_pages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL,
+  page INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  blocks_json TEXT NOT NULL DEFAULT '[]',
+  width REAL,
+  height REAL,
+  ocr_used INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(document_id,page),
+  FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   document_id INTEGER NOT NULL,
@@ -30,6 +42,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_pages ON document_pages(document_id,page);
 CREATE TABLE IF NOT EXISTS lessons (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER,
@@ -75,139 +88,124 @@ CREATE TABLE IF NOT EXISTS study_sessions (
 
 
 def _column_names(con: sqlite3.Connection, table: str) -> set[str]:
-    return {r["name"] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    return {r['name'] for r in con.execute(f'PRAGMA table_info({table})').fetchall()}
 
 
 def _ensure_column(con: sqlite3.Connection, table: str, name: str, ddl: str):
     if name not in _column_names(con, table):
-        con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        con.execute(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}')
 
 
 def _migrate(con: sqlite3.Connection):
-    now = datetime.now(timezone.utc).isoformat()
-    row = con.execute("SELECT id FROM workspaces ORDER BY id LIMIT 1").fetchone()
-    if row:
-        default_id = int(row["id"])
-    else:
-        default_id = int(con.execute(
-            "INSERT INTO workspaces(name,description,goal,created_at) VALUES(?,?,?,?)",
-            ("General", "Workspace creato automaticamente per i dati esistenti.", "", now),
-        ).lastrowid)
-
-    _ensure_column(con, "documents", "workspace_id", "INTEGER")
-    _ensure_column(con, "lessons", "workspace_id", "INTEGER")
-    _ensure_column(con, "lessons", "epistemic_mode", "TEXT NOT NULL DEFAULT 'Grounded'")
-    con.execute("UPDATE documents SET workspace_id=? WHERE workspace_id IS NULL", (default_id,))
-    con.execute("UPDATE lessons SET workspace_id=? WHERE workspace_id IS NULL", (default_id,))
-    # Create indexes only after legacy tables have been upgraded.
-    con.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_lessons_workspace ON lessons(workspace_id)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_notes_workspace ON notes(workspace_id)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON study_sessions(workspace_id)")
+    now=datetime.now(timezone.utc).isoformat()
+    row=con.execute('SELECT id FROM workspaces ORDER BY id LIMIT 1').fetchone()
+    default_id=int(row['id']) if row else int(con.execute(
+        'INSERT INTO workspaces(name,description,goal,created_at) VALUES(?,?,?,?)',
+        ('General','Workspace creato automaticamente per i dati esistenti.','',now)).lastrowid)
+    _ensure_column(con,'documents','workspace_id','INTEGER')
+    _ensure_column(con,'lessons','workspace_id','INTEGER')
+    _ensure_column(con,'lessons','epistemic_mode',"TEXT NOT NULL DEFAULT 'Grounded'")
+    con.execute('UPDATE documents SET workspace_id=? WHERE workspace_id IS NULL',(default_id,))
+    con.execute('UPDATE lessons SET workspace_id=? WHERE workspace_id IS NULL',(default_id,))
+    con.execute('CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_lessons_workspace ON lessons(workspace_id)')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_notes_workspace ON notes(workspace_id)')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON study_sessions(workspace_id)')
 
 
 @contextmanager
 def connect():
-    os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
-    con = sqlite3.connect(settings.db_path)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")
-    con.executescript(SCHEMA)
-    _migrate(con)
+    os.makedirs(os.path.dirname(settings.db_path) or '.',exist_ok=True)
+    con=sqlite3.connect(settings.db_path); con.row_factory=sqlite3.Row
+    con.execute('PRAGMA foreign_keys=ON'); con.executescript(SCHEMA); _migrate(con)
     try:
-        yield con
-        con.commit()
+        yield con; con.commit()
     finally:
         con.close()
 
 
-def add_document(workspace_id: int, name: str, path: str) -> int:
+def add_document(workspace_id:int,name:str,path:str)->int:
     with connect() as con:
-        cur = con.execute(
-            "INSERT INTO documents(workspace_id,name,path,created_at) VALUES(?,?,?,?)",
-            (workspace_id, name, path, datetime.now(timezone.utc).isoformat()),
-        )
+        cur=con.execute('INSERT INTO documents(workspace_id,name,path,created_at) VALUES(?,?,?,?)',
+                        (workspace_id,name,path,datetime.now(timezone.utc).isoformat()))
         return int(cur.lastrowid)
 
 
-def add_chunks(document_id: int, chunks: list[dict], embeddings: list[list[float]]):
+def add_pages(document_id:int,pages:list[dict]):
+    rows=[]
+    for p in pages:
+        if p.get('page') is None: continue
+        rows.append((document_id,int(p['page']),p.get('text',''),json.dumps(p.get('blocks',[]),ensure_ascii=False),
+                     p.get('width'),p.get('height'),1 if p.get('ocr_used') else 0))
+    if rows:
+        with connect() as con:
+            con.executemany('''INSERT OR REPLACE INTO document_pages(document_id,page,text,blocks_json,width,height,ocr_used)
+                               VALUES(?,?,?,?,?,?,?)''',rows)
+
+
+def get_document_page(workspace_id:int,document_id:int,page:int):
     with connect() as con:
-        con.executemany(
-            "INSERT INTO chunks(document_id,page,chunk_index,text,embedding) VALUES(?,?,?,?,?)",
-            [(document_id, c.get("page"), c["chunk_index"], c["text"], json.dumps(e)) for c, e in zip(chunks, embeddings)],
-        )
+        row=con.execute('''SELECT p.*, d.name document_name FROM document_pages p
+                           JOIN documents d ON d.id=p.document_id
+                           WHERE p.document_id=? AND p.page=? AND d.workspace_id=?''',
+                        (document_id,page,workspace_id)).fetchone()
+    if not row: return None
+    data=dict(row); data['blocks']=json.loads(data.pop('blocks_json')); return data
 
 
-def list_documents(workspace_id: int):
+def add_chunks(document_id:int,chunks:list[dict],embeddings:list[list[float]]):
     with connect() as con:
-        return con.execute(
-            "SELECT id,name,created_at FROM documents WHERE workspace_id=? ORDER BY id DESC", (workspace_id,)
-        ).fetchall()
+        con.executemany('INSERT INTO chunks(document_id,page,chunk_index,text,embedding) VALUES(?,?,?,?,?)',
+            [(document_id,c.get('page'),c['chunk_index'],c['text'],json.dumps(e)) for c,e in zip(chunks,embeddings)])
 
 
-def document_belongs_to_workspace(document_id: int, workspace_id: int) -> bool:
+def list_documents(workspace_id:int):
     with connect() as con:
-        return con.execute(
-            "SELECT 1 FROM documents WHERE id=? AND workspace_id=?", (document_id, workspace_id)
-        ).fetchone() is not None
+        return con.execute('SELECT id,name,created_at FROM documents WHERE workspace_id=? ORDER BY id DESC',(workspace_id,)).fetchall()
 
 
-def iter_chunks(workspace_id: int, document_ids: list[int] | None = None):
+def document_belongs_to_workspace(document_id:int,workspace_id:int)->bool:
     with connect() as con:
-        params: list[object] = [workspace_id]
-        where = "d.workspace_id=?"
+        return con.execute('SELECT 1 FROM documents WHERE id=? AND workspace_id=?',(document_id,workspace_id)).fetchone() is not None
+
+
+def iter_chunks(workspace_id:int,document_ids:list[int]|None=None):
+    with connect() as con:
+        params:list[object]=[workspace_id]; where='d.workspace_id=?'
         if document_ids:
-            marks = ",".join("?" for _ in document_ids)
-            where += f" AND c.document_id IN ({marks})"
-            params.extend(document_ids)
-        q = (
-            "SELECT c.*, d.name document_name, d.workspace_id FROM chunks c "
-            "JOIN documents d ON d.id=c.document_id WHERE " + where
-        )
-        return con.execute(q, params).fetchall()
+            marks=','.join('?' for _ in document_ids); where+=f' AND c.document_id IN ({marks})'; params.extend(document_ids)
+        q='SELECT c.*, d.name document_name, d.workspace_id FROM chunks c JOIN documents d ON d.id=c.document_id WHERE '+where
+        return con.execute(q,params).fetchall()
 
 
-def save_lesson(workspace_id: int, topic: str, mode: str, content: str, sources: list[dict], epistemic_mode: str = "Grounded") -> int:
+def save_lesson(workspace_id:int,topic:str,mode:str,content:str,sources:list[dict],epistemic_mode:str='Grounded')->int:
     with connect() as con:
-        cur = con.execute(
-            "INSERT INTO lessons(workspace_id,topic,mode,epistemic_mode,content,sources_json,created_at) VALUES(?,?,?,?,?,?,?)",
-            (workspace_id, topic, mode, epistemic_mode, content, json.dumps(sources, ensure_ascii=False), datetime.now(timezone.utc).isoformat()),
-        )
+        cur=con.execute('''INSERT INTO lessons(workspace_id,topic,mode,epistemic_mode,content,sources_json,created_at)
+                           VALUES(?,?,?,?,?,?,?)''',
+                        (workspace_id,topic,mode,epistemic_mode,content,json.dumps(sources,ensure_ascii=False),datetime.now(timezone.utc).isoformat()))
         return int(cur.lastrowid)
 
 
-def rate_lesson(lesson_id: int, rating: int, feedback: str):
+def rate_lesson(lesson_id:int,rating:int,feedback:str):
+    with connect() as con: con.execute('UPDATE lessons SET rating=?,feedback=? WHERE id=?',(rating,feedback,lesson_id))
+
+
+def rated_lessons(workspace_id:int|None=None):
     with connect() as con:
-        con.execute("UPDATE lessons SET rating=?, feedback=? WHERE id=?", (rating, feedback, lesson_id))
+        if workspace_id is None: return con.execute('SELECT * FROM lessons WHERE rating IS NOT NULL ORDER BY id').fetchall()
+        return con.execute('SELECT * FROM lessons WHERE workspace_id=? AND rating IS NOT NULL ORDER BY id',(workspace_id,)).fetchall()
 
 
-def rated_lessons(workspace_id: int | None = None):
+def delete_document(workspace_id:int,document_id:int):
     with connect() as con:
-        if workspace_id is None:
-            return con.execute("SELECT * FROM lessons WHERE rating IS NOT NULL ORDER BY id").fetchall()
-        return con.execute(
-            "SELECT * FROM lessons WHERE workspace_id=? AND rating IS NOT NULL ORDER BY id", (workspace_id,)
-        ).fetchall()
+        row=con.execute('SELECT path FROM documents WHERE id=? AND workspace_id=?',(document_id,workspace_id)).fetchone()
+        if not row: return
+        con.execute('DELETE FROM chunks WHERE document_id=?',(document_id,)); con.execute('DELETE FROM document_pages WHERE document_id=?',(document_id,)); con.execute('DELETE FROM documents WHERE id=? AND workspace_id=?',(document_id,workspace_id))
+    try: os.remove(row['path'])
+    except OSError: pass
 
 
-def delete_document(workspace_id: int, document_id: int):
+def recent_lessons(workspace_id:int,limit:int=20):
     with connect() as con:
-        row = con.execute(
-            "SELECT path FROM documents WHERE id=? AND workspace_id=?", (document_id, workspace_id)
-        ).fetchone()
-        if not row:
-            return
-        con.execute("DELETE FROM chunks WHERE document_id=?", (document_id,))
-        con.execute("DELETE FROM documents WHERE id=? AND workspace_id=?", (document_id, workspace_id))
-    try:
-        os.remove(row["path"])
-    except OSError:
-        pass
-
-
-def recent_lessons(workspace_id: int, limit: int = 20):
-    with connect() as con:
-        return con.execute(
-            "SELECT id,topic,mode,epistemic_mode,created_at,rating FROM lessons WHERE workspace_id=? ORDER BY id DESC LIMIT ?",
-            (workspace_id, limit),
-        ).fetchall()
+        return con.execute('''SELECT id,topic,mode,epistemic_mode,created_at,rating FROM lessons
+                              WHERE workspace_id=? ORDER BY id DESC LIMIT ?''',(workspace_id,limit)).fetchall()
