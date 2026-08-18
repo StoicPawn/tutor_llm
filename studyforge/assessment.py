@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, re
 from .config import settings
-from .ollama_client import chat
+from .inference import chat
 from .retrieval import retrieve
 from .student import record_result
 
