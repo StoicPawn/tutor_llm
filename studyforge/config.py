@@ -28,6 +28,7 @@ class Settings:
     # API/network settings are mainly relevant in server mode.
     api_host: str = os.getenv('API_HOST', '127.0.0.1')
     api_port: int = int(os.getenv('API_PORT', '8000'))
+    api_token: str = os.getenv('API_TOKEN', '').strip()
     trust_proxy_headers: bool = _env_bool('TRUST_PROXY_HEADERS', False)
 
     ocr_lang: str = os.getenv('OCR_LANG', 'ita+eng')
