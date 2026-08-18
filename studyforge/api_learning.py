@@ -8,6 +8,7 @@ from .review_queue import review_queue
 from .planner import next_best_activity
 from .study_view import study_workspace_state, selection_context, contextual_tutor_request, set_reading_context
 from .pdf_viewer import render_pdf_page, normalize_render_bbox, blocks_in_bbox
+from .annotations import create_annotation, list_annotations, update_annotation, delete_annotation
 
 router=APIRouter()
 
@@ -41,6 +42,21 @@ class ContextActionIn(BaseModel):
     bbox:list[float]|None=None
     user_instruction:str=''
     session_id:int|None=None
+
+class AnnotationIn(BaseModel):
+    workspace_id:int
+    document_id:int
+    page:int
+    kind:str
+    bbox:list[float]|None=None
+    text:str=''
+    payload:dict={}
+
+class AnnotationPatch(BaseModel):
+    workspace_id:int
+    bbox:list[float]|None=None
+    text:str|None=None
+    payload:dict|None=None
 
 class FlashcardsIn(BaseModel):
     workspace_id:int
@@ -94,6 +110,27 @@ def render_selection(payload:RenderSelectionIn):
         mapped=map_selection(payload.workspace_id,payload.document_id,payload.page,selected.get('text',''),source_bbox)
         return {'source_bbox':source_bbox,'selection':selected,'mapped':mapped}
     except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.get('/workspaces/{workspace_id}/documents/{document_id}/annotations')
+def annotations(workspace_id:int,document_id:int,page:int|None=None,limit:int=500):
+    try: return list_annotations(workspace_id,document_id,page,limit)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.post('/annotations')
+def annotation_create(payload:AnnotationIn):
+    try:
+        aid=create_annotation(payload.workspace_id,payload.document_id,payload.page,payload.kind,bbox=payload.bbox,text=payload.text,payload=payload.payload)
+        return {'id':aid}
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.patch('/annotations/{annotation_id}')
+def annotation_patch(annotation_id:int,payload:AnnotationPatch):
+    try: return update_annotation(payload.workspace_id,annotation_id,text=payload.text,bbox=payload.bbox,payload=payload.payload)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.delete('/workspaces/{workspace_id}/annotations/{annotation_id}')
+def annotation_delete(workspace_id:int,annotation_id:int):
+    delete_annotation(workspace_id,annotation_id); return {'ok':True}
 
 @router.get('/workspaces/{workspace_id}/study')
 def study_state(workspace_id:int,session_id:int|None=None,document_id:int|None=None,page:int|None=None):
