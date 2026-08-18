@@ -1,99 +1,202 @@
 from __future__ import annotations
-import os,tempfile
+import json, os, tempfile
 import streamlit as st
 from studyforge.config import settings
-from studyforge.db import list_documents,save_lesson,rate_lesson,delete_document,recent_lessons
+from studyforge.db import list_documents, save_lesson, rate_lesson, delete_document, recent_lessons
 from studyforge.ollama_client import health
 from studyforge.pipeline import ingest_file
-from studyforge.teacher import build_lesson,build_quiz,answer_question
-from studyforge.student import record_result,weakest
-from studyforge.curriculum import create_curriculum,list_curricula,curriculum_nodes,curriculum_document_ids,next_node,set_node_status,delete_curriculum
+from studyforge.teacher import build_lesson, build_quiz, answer_question, summarize, deepen, build_exercises, build_reasoning
+from studyforge.student import record_result, weakest, mastery_for
+from studyforge.curriculum import create_curriculum, list_curricula, curriculum_nodes, curriculum_document_ids, next_node, set_node_status, delete_curriculum
+from studyforge.workspaces import ensure_default_workspace, create_workspace, list_workspaces, get_workspace
+from studyforge.notes import create_note, list_notes, delete_note
+from studyforge.sessions import start_session, active_sessions
 
-st.set_page_config(page_title='StudyForge Local',page_icon='📚',layout='wide')
-st.title('StudyForge Local')
-st.caption('Biblioteca locale → tutor adattivo, lezioni verificabili, quiz e memoria di apprendimento.')
+st.set_page_config(page_title='Tutor LLM', page_icon='📚', layout='wide')
+ensure_default_workspace()
+st.title('Tutor LLM')
+st.caption('Workspace di studio isolati · biblioteca personale · tutor adattivo · provenance · API pronta per web/iPadOS')
+
+workspaces = list_workspaces()
+workspace_labels = {f"{w['name']} (#{w['id']})": int(w['id']) for w in workspaces}
 with st.sidebar:
- st.subheader('Sistema'); st.write(f"LLM: `{settings.chat_model}`"); st.write(f"Embedding: `{settings.embedding_model}`")
- st.success('Ollama connesso') if health() else st.error('Avvia Ollama su '+settings.ollama_url)
- st.divider(); docs=list_documents(); options={f"{r['name']} (#{r['id']})":r['id'] for r in docs}
- selected_labels=st.multiselect('Fonti attive',list(options),default=list(options)); selected_ids=[options[x] for x in selected_labels]
+    st.subheader('Workspace')
+    current_label = st.selectbox('Mondo di studio', list(workspace_labels))
+    workspace_id = workspace_labels[current_label]
+    workspace = get_workspace(workspace_id)
+    if workspace and workspace['goal']:
+        st.caption('Obiettivo: ' + workspace['goal'])
+    with st.expander('Nuovo workspace'):
+        wn = st.text_input('Nome', key='new_workspace_name')
+        wg = st.text_area('Obiettivo', key='new_workspace_goal')
+        wd = st.text_area('Descrizione', key='new_workspace_description')
+        if st.button('Crea workspace', disabled=not wn):
+            try:
+                create_workspace(wn, wd, wg); st.rerun()
+            except Exception as e: st.error(str(e))
+    st.divider()
+    epistemic_mode = st.radio('Politica epistemica', ['Grounded','Tutor','Expert'], index=1,
+                               help='Grounded: solo fonti. Tutor: fonti primarie + integrazioni marcate. Expert: anche gap della biblioteca.')
+    st.subheader('Sistema')
+    st.write(f"LLM: `{settings.chat_model}`")
+    st.write(f"Embedding: `{settings.embedding_model}`")
+    st.success('Ollama connesso') if health() else st.error('Avvia Ollama su ' + settings.ollama_url)
+    st.divider()
+    docs = list_documents(workspace_id)
+    options = {f"{r['name']} (#{r['id']})": int(r['id']) for r in docs}
+    selected_labels = st.multiselect('Fonti attive', list(options), default=list(options))
+    selected_ids = [options[x] for x in selected_labels]
 
-t1,t2,t3,t4,t5,t6=st.tabs(['Libreria','Percorso','Lezione','Domande','Quiz','Progressi'])
-with t1:
- files=st.file_uploader('PDF, DOCX, TXT/MD o immagini',accept_multiple_files=True,type=['pdf','docx','txt','md','png','jpg','jpeg','tif','tiff','webp'])
- if st.button('Indicizza',disabled=not files):
-  for f in files or []:
-   with tempfile.NamedTemporaryFile(delete=False,suffix=os.path.splitext(f.name)[1]) as tmp: tmp.write(f.getbuffer()); p=tmp.name
-   try:
-    with st.spinner('Elaboro '+f.name): r=ingest_file(p,f.name)
-    st.success(f"{r['name']}: {r['chunks']} sezioni")
-   except Exception as e: st.error(f'{f.name}: {e}')
-   finally:
-    try: os.unlink(p)
-    except OSError: pass
-  st.rerun()
- if docs:
-  st.subheader('Documenti indicizzati')
-  for d in docs:
-   c1,c2=st.columns([5,1]); c1.write(f"**{d['name']}** — {d['created_at'][:10]}")
-   if c2.button('Elimina',key=f"del{d['id']}"): delete_document(d['id']); st.rerun()
-with t2:
- st.subheader('Percorso di studio adattivo')
- goal=st.text_input('Obiettivo',placeholder='Es. padroneggiare questo manuale per un esame')
- cname=st.text_input('Nome percorso',value='Il mio percorso')
- if st.button('Analizza i documenti e crea syllabus',disabled=not goal or not selected_ids):
-  try:
-   with st.spinner('Costruisco concetti e prerequisiti...'): cid=create_curriculum(cname,goal,selected_ids)
-   st.session_state.curriculum_id=cid; st.rerun()
-  except Exception as e: st.error(str(e))
- curricula=list_curricula()
- if curricula:
-  labels={f"{r['title']} — {r['goal']} (#{r['id']})":r['id'] for r in curricula}
-  current=st.selectbox('Percorso',list(labels)); cid=labels[current]; st.session_state.curriculum_id=cid
-  nxt=next_node(cid)
-  if nxt:
-   st.info(f"Prossima lezione consigliata: **{nxt['title']}** — {nxt['description']}")
-   if st.button('Studia la prossima lezione',type='primary'):
-    ids=curriculum_document_ids(cid); lesson,sources=build_lesson(nxt['title'],'Approfondita',ids); lid=save_lesson(nxt['title'],'Approfondita',lesson,sources); set_node_status(nxt['id'],'learning'); st.session_state.update(lesson=lesson,lesson_id=lid,sources=sources,lesson_topic=nxt['title']); st.success('Lezione pronta nella scheda Lezione.')
-  for r in curriculum_nodes(cid):
-   prereq=', '.join(__import__('json').loads(r['prerequisites_json'])) or '—'; m=__import__('studyforge.student',fromlist=['mastery_for']).mastery_for(r['title'])
-   st.write(f"{r['position']}. **{r['title']}** · {r['status']} · padronanza {m:.0%} · prerequisiti: {prereq}")
-  if st.button('Elimina percorso'): delete_curriculum(cid); st.rerun()
- else: st.info('Crea il primo percorso dai documenti selezionati.')
-with t3:
- topic=st.text_input('Cosa vuoi capire?',placeholder='Es. fenomeno e noumeno in Kant')
- mode=st.radio('Profondità',['Breve','Approfondita','Ripasso'],horizontal=True)
- if st.button('Crea lezione',type='primary',disabled=not topic or not selected_ids):
-  with st.spinner('Costruisco la lezione...'):
-   try:
-    lesson,sources=build_lesson(topic,mode,selected_ids); lid=save_lesson(topic,mode,lesson,sources)
-    st.session_state.update(lesson=lesson,lesson_id=lid,sources=sources,lesson_topic=topic)
-   except Exception as e: st.error(str(e))
- if st.session_state.get('lesson'):
-  st.markdown(st.session_state.lesson)
-  with st.expander('Evidenze recuperate'): st.json(st.session_state.sources)
-  rating=st.slider('Utilità',1,5,4); feedback=st.text_area('Come migliorare?')
-  if st.button('Salva feedback'):
-   rate_lesson(st.session_state.lesson_id,rating,feedback); record_result(st.session_state.lesson_topic,(rating-1)/4,'lesson_feedback'); st.success('Profilo aggiornato.')
-with t4:
- q=st.text_input('Fai una domanda ai tuoi documenti')
- if st.button('Rispondi dalle fonti',disabled=not q or not selected_ids):
-  try:
-   ans,src=answer_question(q,selected_ids); st.markdown(ans)
-   with st.expander('Evidenze'): st.json(src)
-  except Exception as e: st.error(str(e))
-with t5:
- qt=st.text_input('Argomento del quiz'); n=st.slider('Domande',4,15,8)
- if st.button('Genera quiz',disabled=not qt or not selected_ids):
-  try: st.session_state.quiz=build_quiz(qt,selected_ids,n); st.session_state.quiz_topic=qt
-  except Exception as e: st.error(str(e))
- if st.session_state.get('quiz'):
-  st.markdown(st.session_state.quiz); score=st.slider('Quanto hai risposto correttamente?',0,100,70)
-  if st.button('Registra risultato quiz'): record_result(st.session_state.quiz_topic,score/100,'quiz'); st.success('Padronanza aggiornata.')
-with t6:
- st.subheader('Concetti da rinforzare'); rows=weakest(12)
- if rows:
-  for r in rows: st.progress(float(r['mastery']),text=f"{r['name']} — {float(r['mastery']):.0%} ({r['attempts']} evidenze)")
- else: st.info('Studia e valuta una lezione o un quiz per costruire il profilo.')
- st.subheader('Lezioni recenti')
- for r in recent_lessons(10): st.write(f"#{r['id']} · **{r['topic']}** · {r['mode']} · voto {r['rating'] or '—'}")
+(t_library, t_path, t_tutor, t_summary, t_exercises, t_notes, t_progress) = st.tabs([
+    'Biblioteca', 'Percorso', 'Tutor', 'Riassumi / Approfondisci', 'Esercizi / Ragionamento', 'Note', 'Progressi'
+])
+
+with t_library:
+    st.subheader(workspace['name'] if workspace else 'Biblioteca')
+    files = st.file_uploader('PDF, DOCX, TXT/MD o immagini', accept_multiple_files=True,
+                             type=['pdf','docx','txt','md','png','jpg','jpeg','tif','tiff','webp'])
+    if st.button('Indicizza nel workspace', disabled=not files):
+        for f in files or []:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(f.name)[1]) as tmp:
+                tmp.write(f.getbuffer()); p = tmp.name
+            try:
+                with st.spinner('Elaboro ' + f.name):
+                    r = ingest_file(workspace_id, p, f.name)
+                st.success(f"{r['name']}: {r['chunks']} sezioni indicizzate")
+            except Exception as e:
+                st.error(f'{f.name}: {e}')
+            finally:
+                try: os.unlink(p)
+                except OSError: pass
+        st.rerun()
+    if docs:
+        for d in docs:
+            c1, c2 = st.columns([5,1])
+            c1.write(f"**{d['name']}** — {d['created_at'][:10]}")
+            if c2.button('Elimina', key=f"del_{workspace_id}_{d['id']}"):
+                delete_document(workspace_id, int(d['id'])); st.rerun()
+    else:
+        st.info('Questo workspace non contiene ancora documenti.')
+
+with t_path:
+    st.subheader('Percorso di studio adattivo')
+    goal = st.text_input('Obiettivo del percorso', value=(workspace['goal'] if workspace else ''),
+                         placeholder='Es. arrivare a un livello avanzato di analisi matematica')
+    cname = st.text_input('Nome percorso', value='Percorso principale')
+    if st.button('Analizza biblioteca e crea syllabus', disabled=not goal or not selected_ids):
+        try:
+            with st.spinner('Costruisco concetti e prerequisiti...'):
+                create_curriculum(workspace_id, cname, goal, selected_ids)
+            st.rerun()
+        except Exception as e: st.error(str(e))
+    curricula = list_curricula(workspace_id)
+    if curricula:
+        labels = {f"{r['title']} — {r['goal']} (#{r['id']})": int(r['id']) for r in curricula}
+        cid = labels[st.selectbox('Percorso', list(labels))]
+        nxt = next_node(workspace_id, cid)
+        if nxt:
+            st.info(f"Prossima attività consigliata: **{nxt['title']}** — {nxt['description']}")
+            if st.button('Genera la prossima lezione', type='primary'):
+                ids = curriculum_document_ids(workspace_id, cid)
+                lesson, sources = build_lesson(workspace_id, nxt['title'], 'Approfondita', ids, epistemic_mode)
+                lid = save_lesson(workspace_id, nxt['title'], 'Approfondita', lesson, sources, epistemic_mode)
+                set_node_status(int(nxt['id']), 'learning')
+                st.session_state.update(lesson=lesson, lesson_id=lid, sources=sources, lesson_topic=nxt['title'])
+        for r in curriculum_nodes(cid):
+            prereq = ', '.join(json.loads(r['prerequisites_json'])) or '—'
+            m = mastery_for(workspace_id, r['title'])
+            st.write(f"{r['position']}. **{r['title']}** · {r['status']} · mastery {m:.0%} · prerequisiti: {prereq}")
+        if st.button('Elimina percorso'):
+            delete_curriculum(workspace_id, cid); st.rerun()
+    else:
+        st.info('Crea un percorso usando i documenti di questo workspace.')
+
+with t_tutor:
+    st.subheader('Tutor')
+    q = st.text_area('Domanda o argomento', placeholder='Chiedi una spiegazione, una connessione o un passaggio che non hai capito')
+    c1, c2 = st.columns(2)
+    action = c1.selectbox('Azione', ['Domanda','Lezione'])
+    lesson_mode = c2.selectbox('Profondità', ['Breve','Approfondita','Ripasso'])
+    if st.button('Avvia tutor', type='primary', disabled=not q or not selected_ids):
+        try:
+            if action == 'Domanda':
+                content, sources = answer_question(workspace_id, q, selected_ids, epistemic_mode)
+            else:
+                content, sources = build_lesson(workspace_id, q, lesson_mode, selected_ids, epistemic_mode)
+                lid = save_lesson(workspace_id, q, lesson_mode, content, sources, epistemic_mode)
+                st.session_state.update(lesson_id=lid, lesson_topic=q)
+            st.session_state.update(tutor_content=content, tutor_sources=sources)
+        except Exception as e: st.error(str(e))
+    if st.session_state.get('tutor_content'):
+        st.markdown(st.session_state.tutor_content)
+        with st.expander('Evidenze recuperate'): st.json(st.session_state.tutor_sources)
+
+with t_summary:
+    st.subheader('Riassumi o approfondisci')
+    req = st.text_area('Tema / richiesta', key='summary_request', placeholder='Es. riassumi le diverse definizioni di convergenza e confrontale')
+    action = st.radio('Operazione', ['Riassumi','Approfondisci'], horizontal=True)
+    if st.button('Genera', key='summary_generate', disabled=not req or not selected_ids):
+        try:
+            fn = summarize if action == 'Riassumi' else deepen
+            content, sources = fn(workspace_id, req, selected_ids, epistemic_mode)
+            st.session_state.update(study_content=content, study_sources=sources)
+        except Exception as e: st.error(str(e))
+    if st.session_state.get('study_content'):
+        st.markdown(st.session_state.study_content)
+        with st.expander('Evidenze'): st.json(st.session_state.study_sources)
+
+with t_exercises:
+    st.subheader('Esercizi, quiz e ragionamento')
+    topic = st.text_input('Argomento', key='exercise_topic')
+    activity = st.radio('Attività', ['Esercizi','Quiz','Ragionamento'], horizontal=True)
+    n = st.slider('Numero', 4, 12, 6)
+    if st.button('Crea attività', disabled=not topic or not selected_ids):
+        try:
+            if activity == 'Esercizi':
+                content, sources = build_exercises(workspace_id, topic, selected_ids, n=n, epistemic_mode=epistemic_mode)
+            elif activity == 'Quiz':
+                content = build_quiz(workspace_id, topic, selected_ids, n, epistemic_mode); sources = []
+            else:
+                content, sources = build_reasoning(workspace_id, topic, selected_ids, epistemic_mode)
+            st.session_state.update(activity_content=content, activity_sources=sources, activity_topic=topic)
+        except Exception as e: st.error(str(e))
+    if st.session_state.get('activity_content'):
+        st.markdown(st.session_state.activity_content)
+        score = st.slider('Risultato / autovalutazione', 0, 100, 70)
+        if st.button('Registra risultato'):
+            record_result(workspace_id, st.session_state.activity_topic, score/100, activity.lower())
+            st.success('Mastery del workspace aggiornata.')
+
+with t_notes:
+    st.subheader('Note e fogli di studio')
+    title = st.text_input('Titolo nota')
+    body = st.text_area('Contenuto', height=180, placeholder='Le note sono artefatti personali e restano separate dalle fonti autorevoli.')
+    doc_for_note = st.selectbox('Collega a documento (opzionale)', ['—'] + list(options)) if options else '—'
+    page = st.number_input('Pagina (opzionale)', min_value=0, value=0)
+    if st.button('Salva nota', disabled=not title):
+        did = options.get(doc_for_note) if doc_for_note != '—' else None
+        create_note(workspace_id, title, body, document_id=did, page=(int(page) or None))
+        st.rerun()
+    for note in list_notes(workspace_id):
+        label = f"{note['title']} · {note['document_name'] or 'nota libera'}" + (f" · p.{note['page']}" if note['page'] else '')
+        with st.expander(label):
+            st.write(note['content'] or '—')
+            if st.button('Elimina nota', key=f"note_del_{note['id']}"):
+                delete_note(workspace_id, int(note['id'])); st.rerun()
+
+with t_progress:
+    st.subheader('Concetti da rinforzare')
+    rows = weakest(workspace_id, 12)
+    if rows:
+        for r in rows:
+            st.progress(float(r['mastery']), text=f"{r['name']} — {float(r['mastery']):.0%} ({r['attempts']} evidenze)")
+    else:
+        st.info('Le attività valutate costruiranno il profilo di mastery di questo workspace.')
+    st.subheader('Lezioni recenti')
+    for r in recent_lessons(workspace_id, 10):
+        st.write(f"#{r['id']} · **{r['topic']}** · {r['mode']} · {r['epistemic_mode']} · voto {r['rating'] or '—'}")
+    st.subheader('Sessioni di studio')
+    if st.button('Avvia nuova Study Session'):
+        start_session(workspace_id, workspace['goal'] if workspace else ''); st.rerun()
+    for s in active_sessions(workspace_id):
+        st.write(f"Sessione #{s['id']} · documento {s['current_document_id'] or '—'} · pagina {s['current_page'] or '—'} · concetto {s['current_concept'] or '—'}")
