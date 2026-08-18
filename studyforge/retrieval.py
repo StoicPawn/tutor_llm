@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import numpy as np
 from .db import iter_chunks
-from .ollama_client import embed
+from .inference import embed
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
