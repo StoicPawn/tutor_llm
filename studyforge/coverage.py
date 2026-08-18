@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, re
 from .db import iter_chunks
-from .ollama_client import chat
+from .inference import chat
 
 
 def _parse_json(text: str) -> dict:
