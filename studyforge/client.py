@@ -44,6 +44,23 @@ class TutorClient:
     def workspace_manifest(self, workspace_id:int) -> dict:
         return self._request('GET',f'/sync/workspaces/{workspace_id}/manifest')
 
+    def sync_pull(self, workspace_id:int, since:int=0, limit:int=500) -> dict:
+        return self._request('GET',f'/sync/workspaces/{workspace_id}/changes?since={int(since)}&limit={int(limit)}')
+
+    def sync_push(self, workspace_id:int, entity_type:str, client_uuid:str, base_revision:int,
+                  payload:dict|None=None, *, deleted:bool=False, server_id:int|None=None) -> dict:
+        return self._request('POST','/sync/push',json={
+            'workspace_id':workspace_id,'entity_type':entity_type,'client_uuid':client_uuid,
+            'base_revision':base_revision,'payload':payload or {},'deleted':deleted,'server_id':server_id,
+        })
+
+    def sync_resolve(self, workspace_id:int, entity_type:str, client_uuid:str, server_revision:int,
+                     payload:dict|None=None, *, deleted:bool=False) -> dict:
+        return self._request('POST','/sync/resolve',json={
+            'workspace_id':workspace_id,'entity_type':entity_type,'client_uuid':client_uuid,
+            'server_revision':server_revision,'payload':payload or {},'deleted':deleted,
+        })
+
     def workspaces(self) -> list[dict]:
         return self._request('GET', '/workspaces')
 
