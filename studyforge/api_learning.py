@@ -9,6 +9,7 @@ from .planner import next_best_activity
 from .study_view import study_workspace_state, selection_context, contextual_tutor_request, set_reading_context
 from .pdf_viewer import render_pdf_page, normalize_render_bbox, blocks_in_bbox
 from .annotations import create_annotation, list_annotations, update_annotation, delete_annotation
+from .notebooks import create_notebook, list_notebooks, get_notebook, add_page, save_page, delete_notebook
 
 router=APIRouter()
 
@@ -57,6 +58,27 @@ class AnnotationPatch(BaseModel):
     bbox:list[float]|None=None
     text:str|None=None
     payload:dict|None=None
+
+class NotebookIn(BaseModel):
+    workspace_id:int
+    title:str
+    description:str=''
+    document_id:int|None=None
+    page:int|None=None
+    concept:str|None=None
+
+class NotebookPageIn(BaseModel):
+    workspace_id:int
+    title:str=''
+    background:str='blank'
+    width:float=1024
+    height:float=1365
+
+class NotebookPagePatch(BaseModel):
+    workspace_id:int
+    layers:list[dict]
+    title:str|None=None
+    background:str|None=None
 
 class FlashcardsIn(BaseModel):
     workspace_id:int
@@ -131,6 +153,38 @@ def annotation_patch(annotation_id:int,payload:AnnotationPatch):
 @router.delete('/workspaces/{workspace_id}/annotations/{annotation_id}')
 def annotation_delete(workspace_id:int,annotation_id:int):
     delete_annotation(workspace_id,annotation_id); return {'ok':True}
+
+@router.get('/workspaces/{workspace_id}/notebooks')
+def notebooks(workspace_id:int):
+    try: return list_notebooks(workspace_id)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.post('/notebooks')
+def notebook_create(payload:NotebookIn):
+    try:
+        nid=create_notebook(payload.workspace_id,payload.title,payload.description,document_id=payload.document_id,page=payload.page,concept=payload.concept)
+        return get_notebook(payload.workspace_id,nid)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.get('/workspaces/{workspace_id}/notebooks/{notebook_id}')
+def notebook_get(workspace_id:int,notebook_id:int):
+    data=get_notebook(workspace_id,notebook_id)
+    if not data: raise HTTPException(status_code=404,detail='Quaderno non trovato.')
+    return data
+
+@router.post('/notebooks/{notebook_id}/pages')
+def notebook_page_add(notebook_id:int,payload:NotebookPageIn):
+    try: return add_page(payload.workspace_id,notebook_id,title=payload.title,background=payload.background,width=payload.width,height=payload.height)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.patch('/notebooks/{notebook_id}/pages/{page_id}')
+def notebook_page_save(notebook_id:int,page_id:int,payload:NotebookPagePatch):
+    try: return save_page(payload.workspace_id,notebook_id,page_id,layers=payload.layers,title=payload.title,background=payload.background)
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@router.delete('/workspaces/{workspace_id}/notebooks/{notebook_id}')
+def notebook_delete(workspace_id:int,notebook_id:int):
+    delete_notebook(workspace_id,notebook_id); return {'ok':True}
 
 @router.get('/workspaces/{workspace_id}/study')
 def study_state(workspace_id:int,session_id:int|None=None,document_id:int|None=None,page:int|None=None):
