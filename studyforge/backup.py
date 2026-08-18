@@ -78,6 +78,23 @@ def inspect_backup(archive: str) -> dict:
         return manifest
 
 
+def _relocate_document_paths(db_target: Path, uploads_target: Path) -> None:
+    con = sqlite3.connect(str(db_target))
+    con.row_factory = sqlite3.Row
+    try:
+        exists = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents'").fetchone()
+        if not exists:
+            return
+        rows = con.execute('SELECT id,workspace_id,path FROM documents').fetchall()
+        for row in rows:
+            old_name = Path(row['path']).name
+            new_path = uploads_target / str(row['workspace_id']) / old_name
+            con.execute('UPDATE documents SET path=? WHERE id=?', (str(new_path), int(row['id'])))
+        con.commit()
+    finally:
+        con.close()
+
+
 def import_backup(archive: str, *, replace: bool = False) -> dict:
     """Restore a backup. Intended to run while Tutor LLM services are stopped."""
     manifest = inspect_backup(archive)
@@ -106,4 +123,5 @@ def import_backup(archive: str, *, replace: bool = False) -> dict:
                     dst = uploads_target / src.relative_to(extracted_uploads)
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
+        _relocate_document_paths(db_target, uploads_target)
     return manifest
