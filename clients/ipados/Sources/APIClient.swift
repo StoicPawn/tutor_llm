@@ -82,6 +82,30 @@ actor APIClient {
         return data
     }
 
+    func notebooks(workspaceID: Int) async throws -> [NotebookSummary] {
+        let (data, _) = try await request("/workspaces/\(workspaceID)/notebooks")
+        return try decoder.decode([NotebookSummary].self, from: data)
+    }
+
+    func notebook(workspaceID: Int, notebookID: Int) async throws -> NotebookDetail {
+        let (data, _) = try await request("/workspaces/\(workspaceID)/notebooks/\(notebookID)")
+        return try decoder.decode(NotebookDetail.self, from: data)
+    }
+
+    func createNotebook(workspaceID: Int, title: String, documentID: Int?, page: Int? = nil) async throws -> Int {
+        struct Request: Codable {
+            let workspace_id: Int
+            let title: String
+            let linked_document_id: Int?
+            let linked_page: Int?
+            let concept: String
+        }
+        struct Response: Codable { let id: Int }
+        let payload = Request(workspace_id: workspaceID, title: title, linked_document_id: documentID, linked_page: page, concept: "")
+        let (data, _) = try await request("/notebooks", method: "POST", body: try encoder.encode(payload))
+        return try decoder.decode(Response.self, from: data).id
+    }
+
     func manifest(workspaceID: Int) async throws -> SyncManifest {
         let (data, _) = try await request("/sync/workspaces/\(workspaceID)/manifest")
         return try decoder.decode(SyncManifest.self, from: data)
