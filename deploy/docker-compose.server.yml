@@ -13,6 +13,7 @@ services:
       STUDYFORGE_DB: /data/studyforge.db
       STUDYFORGE_UPLOADS: /data/uploads
       OCR_LANG: ${OCR_LANG:-ita+eng}
+      API_TOKEN: ${API_TOKEN:?API_TOKEN is required in server mode}
     volumes:
       - tutor_data:/data
     ports:
