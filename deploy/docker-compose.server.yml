@@ -18,9 +18,32 @@ services:
       - tutor_data:/data
       - ./backups:/backups
     ports:
-      # Bind only to localhost by default. Expose remotely through a private tunnel
-      # such as Tailscale Serve rather than publishing Tutor LLM directly on Internet.
-      - "127.0.0.1:${TUTOR_PORT:-8200}:8000"
+      # API stays local-only. Remote clients should reach it through a private tunnel.
+      - "127.0.0.1:${TUTOR_API_PORT:-8201}:8000"
+    depends_on:
+      - ollama
+
+  tutor-web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["streamlit", "run", "app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
+    restart: unless-stopped
+    environment:
+      DEPLOY_MODE: server
+      INFERENCE_PROVIDER: ollama
+      OLLAMA_URL: http://ollama:11434
+      CHAT_MODEL: ${CHAT_MODEL:-qwen3:4b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-embeddinggemma}
+      STUDYFORGE_DB: /data/studyforge.db
+      STUDYFORGE_UPLOADS: /data/uploads
+      OCR_LANG: ${OCR_LANG:-ita+eng}
+      API_TOKEN: ${API_TOKEN:?API_TOKEN is required in server mode}
+    volumes:
+      - tutor_data:/data
+    ports:
+      # Keep the browser UI local-only and publish it to iPad/phone with Tailscale Serve.
+      - "127.0.0.1:${TUTOR_WEB_PORT:-8200}:8501"
     depends_on:
       - ollama
 
