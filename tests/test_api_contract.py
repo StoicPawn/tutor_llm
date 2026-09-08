@@ -3,7 +3,9 @@ from studyforge.api import app
 
 class ApiContractTests(unittest.TestCase):
     def test_learning_routes_are_exposed(self):
-        paths={r.path for r in app.routes}
+        # Newer Starlette/FastAPI versions can keep internal router markers in
+        # app.routes. Contract checks should only inspect actual path-bearing routes.
+        paths={r.path for r in app.routes if hasattr(r,'path')}
         expected={
             '/documents/selection/map',
             '/documents/structure/rebuild',
