@@ -1,0 +1,110 @@
+name: local-verify-deploy
+
+on:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tutor-llm-local-main
+  cancel-in-progress: true
+
+jobs:
+  verify-and-deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: [self-hosted, linux, tutor-local]
+    timeout-minutes: 90
+
+    steps:
+      - name: Choose trusted revision
+        id: rev
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout trusted commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.rev.outputs.sha }}
+          clean: true
+
+      - name: Verify on mini-PC
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .gha-venv
+          python3 -m venv .gha-venv
+          .gha-venv/bin/python -m pip install --upgrade pip
+          .gha-venv/bin/pip install numpy requests PyMuPDF python-docx Pillow pytesseract
+          .gha-venv/bin/python -m compileall -q studyforge app.py tests
+          .gha-venv/bin/python -m unittest discover -s tests -v
+          docker compose --env-file deploy/.env.server.example -f deploy/docker-compose.server.yml config >/dev/null
+
+      - name: Deploy tested main
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          DEPLOY_DIR: /home/stoicpawn/projects/tutor_llm
+        run: |
+          set -euo pipefail
+          test -d "$DEPLOY_DIR/.git"
+          test -f "$DEPLOY_DIR/deploy/.env"
+
+          if [ -n "$(git -C "$DEPLOY_DIR" status --porcelain --untracked-files=no)" ]; then
+            echo "Production checkout has tracked local changes; refusing to overwrite them."
+            git -C "$DEPLOY_DIR" status --short
+            exit 1
+          fi
+
+          git -C "$DEPLOY_DIR" fetch origin main
+          git -C "$DEPLOY_DIR" checkout main
+          git -C "$DEPLOY_DIR" reset --hard "${{ steps.rev.outputs.sha }}"
+
+          cd "$DEPLOY_DIR/deploy"
+          mkdir -p backups
+          docker compose --env-file .env -f docker-compose.server.yml up -d --build --remove-orphans
+
+      - name: Health check
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          DEPLOY_DIR: /home/stoicpawn/projects/tutor_llm
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_DIR/deploy"
+          WEB_PORT="$(awk -F= '$1=="TUTOR_WEB_PORT" {print $2}' .env | tail -n1)"
+          API_PORT="$(awk -F= '$1=="TUTOR_API_PORT" {print $2}' .env | tail -n1)"
+          WEB_PORT="${WEB_PORT:-8200}"
+          API_PORT="${API_PORT:-8201}"
+
+          WEB_OK=0
+          API_OK=0
+          for _ in $(seq 1 60); do
+            if [ "$WEB_OK" -eq 0 ] && curl -fsS --max-time 3 "http://127.0.0.1:${WEB_PORT}/" >/dev/null; then
+              WEB_OK=1
+            fi
+            if [ "$API_OK" -eq 0 ] && curl -fsS --max-time 3 "http://127.0.0.1:${API_PORT}/docs" >/dev/null; then
+              API_OK=1
+            fi
+            if [ "$WEB_OK" -eq 1 ] && [ "$API_OK" -eq 1 ]; then
+              echo "Tutor LLM deploy and health checks OK: web=${WEB_PORT}, api=${API_PORT}"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker compose --env-file .env -f docker-compose.server.yml ps || true
+          docker compose --env-file .env -f docker-compose.server.yml logs --tail=120 tutor tutor-web || true
+          exit 1
