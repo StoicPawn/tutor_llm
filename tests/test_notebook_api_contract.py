@@ -1,14 +1,13 @@
 import unittest
+
+from fastapi.routing import iter_route_contexts
+
 from studyforge.api import app
 
 
 class NotebookApiContractTests(unittest.TestCase):
     def test_notebook_routes_exist(self):
-        routes={
-            (r.path,tuple(sorted(getattr(r,'methods',None) or [])))
-            for r in app.routes if hasattr(r,'path')
-        }
-        paths={p for p,_ in routes}
+        paths={ctx.path for ctx in iter_route_contexts(app.routes)}
         expected={
             '/workspaces/{workspace_id}/notebooks',
             '/notebooks',
@@ -18,4 +17,6 @@ class NotebookApiContractTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(paths), expected-paths)
 
-if __name__=='__main__': unittest.main()
+
+if __name__=='__main__':
+    unittest.main()
