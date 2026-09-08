@@ -13,9 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install minimal test dependencies
-        run: pip install numpy requests PyMuPDF python-docx Pillow pytesseract
+      - name: Install application dependencies
+        run: pip install -r requirements.txt
       - name: Compile
-        run: python -m compileall -q studyforge app.py tests
+        run: python -m compileall -q studyforge app.py pages tests
       - name: Unit tests
         run: python -m unittest discover -s tests -v
