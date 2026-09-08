@@ -47,7 +47,7 @@ jobs:
           rm -rf .gha-venv
           python3 -m venv .gha-venv
           .gha-venv/bin/python -m pip install --upgrade pip
-          .gha-venv/bin/pip install numpy requests PyMuPDF python-docx Pillow pytesseract
+          .gha-venv/bin/pip install -r requirements.txt
           .gha-venv/bin/python -m compileall -q studyforge app.py tests
           .gha-venv/bin/python -m unittest discover -s tests -v
           docker compose --env-file deploy/.env.server.example -f deploy/docker-compose.server.yml config >/dev/null
