@@ -22,8 +22,11 @@ class OfflineSyncTests(unittest.TestCase):
         conflict=sync.push_change(self.wid,'note',cid,1,{'title':'A','content':'stale'})
         self.assertEqual(conflict['status'],'conflict'); self.assertEqual(conflict['expected_revision'],2)
     def test_tombstone_is_synced(self):
-        cid=str(uuid.uuid4()); sync.push_change(self.wid,'annotation',cid,0,{'text':'x'})
-        deleted=sync.push_change(self.wid,'annotation',cid,1,{},True)
+        # Tombstone semantics are entity-agnostic; use a valid note payload here.
+        # Annotation creation now correctly requires a document_id belonging to the
+        # workspace, so the old synthetic annotation payload was invalid application data.
+        cid=str(uuid.uuid4()); sync.push_change(self.wid,'note',cid,0,{'title':'x','content':'x'})
+        deleted=sync.push_change(self.wid,'note',cid,1,{},True)
         self.assertTrue(deleted['object']['deleted'])
         feed=sync.pull_changes(self.wid,1); self.assertEqual(feed['changes'][-1]['operation'],'delete')
 
