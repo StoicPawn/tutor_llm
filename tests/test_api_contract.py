@@ -1,11 +1,15 @@
 import unittest
+
+from fastapi.routing import iter_route_contexts
+
 from studyforge.api import app
+
 
 class ApiContractTests(unittest.TestCase):
     def test_learning_routes_are_exposed(self):
-        # Newer Starlette/FastAPI versions can keep internal router markers in
-        # app.routes. Contract checks should only inspect actual path-bearing routes.
-        paths={r.path for r in app.routes if hasattr(r,'path')}
+        # FastAPI >=0.137 preserves included routers lazily. Enumerate route
+        # contexts instead of assuming app.routes is a flat list of APIRoutes.
+        paths={ctx.path for ctx in iter_route_contexts(app.routes)}
         expected={
             '/documents/selection/map',
             '/documents/structure/rebuild',
@@ -27,4 +31,6 @@ class ApiContractTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(paths), expected-paths)
 
-if __name__=='__main__': unittest.main()
+
+if __name__=='__main__':
+    unittest.main()
