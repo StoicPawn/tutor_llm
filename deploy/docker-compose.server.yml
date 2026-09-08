@@ -14,12 +14,16 @@ services:
       STUDYFORGE_UPLOADS: /data/uploads
       OCR_LANG: ${OCR_LANG:-ita+eng}
       API_TOKEN: ${API_TOKEN:?API_TOKEN is required in server mode}
+      RESEARCH_LAB_URL: ${RESEARCH_LAB_URL:-http://research-lab:8300}
+      RESEARCH_LAB_TOKEN: ${RESEARCH_LAB_TOKEN:-}
     volumes:
       - tutor_data:/data
       - ./backups:/backups
     ports:
-      # API stays local-only. Remote clients should reach it through a private tunnel.
       - "127.0.0.1:${TUTOR_API_PORT:-8201}:8000"
+    networks:
+      - default
+      - home-lab
     depends_on:
       - ollama
 
@@ -39,11 +43,15 @@ services:
       STUDYFORGE_UPLOADS: /data/uploads
       OCR_LANG: ${OCR_LANG:-ita+eng}
       API_TOKEN: ${API_TOKEN:?API_TOKEN is required in server mode}
+      RESEARCH_LAB_URL: ${RESEARCH_LAB_URL:-http://research-lab:8300}
+      RESEARCH_LAB_TOKEN: ${RESEARCH_LAB_TOKEN:-}
     volumes:
       - tutor_data:/data
     ports:
-      # Keep the browser UI local-only and publish it to iPad/phone with Tailscale Serve.
       - "127.0.0.1:${TUTOR_WEB_PORT:-8200}:8501"
+    networks:
+      - default
+      - home-lab
     depends_on:
       - ollama
 
@@ -56,9 +64,12 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-60s}
     volumes:
       - ollama_models:/root/.ollama
-    # Ollama is intentionally not published to the host/network. Tutor Core reaches it
-    # only through the private Docker network.
 
 volumes:
   tutor_data:
   ollama_models:
+
+networks:
+  home-lab:
+    external: true
+    name: home-lab
