@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 
 
@@ -11,35 +11,32 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    # Deployment profile: local = everything on one PC; server = shared core for remote clients.
-    deploy_mode: str = os.getenv('DEPLOY_MODE', 'local').strip().lower()
-    inference_provider: str = os.getenv('INFERENCE_PROVIDER', 'ollama').strip().lower()
+    # Use factories so tests and embedding applications can change environment
+    # variables before constructing a Settings instance.
+    deploy_mode: str = field(default_factory=lambda: os.getenv('DEPLOY_MODE', 'local').strip().lower())
+    inference_provider: str = field(default_factory=lambda: os.getenv('INFERENCE_PROVIDER', 'ollama').strip().lower())
 
-    # Inference backend. In local mode this normally points to localhost; in server mode
-    # it may point to an Ollama service/container on the same private server network.
-    ollama_url: str = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-    chat_model: str = os.getenv('CHAT_MODEL', 'qwen3:4b')
-    embedding_model: str = os.getenv('EMBEDDING_MODEL', 'embeddinggemma')
+    ollama_url: str = field(default_factory=lambda: os.getenv('OLLAMA_URL', 'http://localhost:11434'))
+    chat_model: str = field(default_factory=lambda: os.getenv('CHAT_MODEL', 'qwen3:4b'))
+    embedding_model: str = field(default_factory=lambda: os.getenv('EMBEDDING_MODEL', 'embeddinggemma'))
 
-    # Persistent user data. These paths are local to the machine running Tutor LLM Core.
-    db_path: str = os.getenv('STUDYFORGE_DB', 'data/studyforge.db')
-    upload_dir: str = os.getenv('STUDYFORGE_UPLOADS', 'data/uploads')
+    db_path: str = field(default_factory=lambda: os.getenv('STUDYFORGE_DB', 'data/studyforge.db'))
+    upload_dir: str = field(default_factory=lambda: os.getenv('STUDYFORGE_UPLOADS', 'data/uploads'))
 
-    # API/network settings are mainly relevant in server mode.
-    api_host: str = os.getenv('API_HOST', '127.0.0.1')
-    api_port: int = int(os.getenv('API_PORT', '8000'))
-    api_token: str = os.getenv('API_TOKEN', '').strip()
-    trust_proxy_headers: bool = _env_bool('TRUST_PROXY_HEADERS', False)
+    api_host: str = field(default_factory=lambda: os.getenv('API_HOST', '127.0.0.1'))
+    api_port: int = field(default_factory=lambda: int(os.getenv('API_PORT', '8000')))
+    api_token: str = field(default_factory=lambda: os.getenv('API_TOKEN', '').strip())
+    trust_proxy_headers: bool = field(default_factory=lambda: _env_bool('TRUST_PROXY_HEADERS', False))
 
     # Optional standalone Research Lab integration. Tutor does not own Lab data;
     # it only calls the service through its HTTP API when configured.
-    research_lab_url: str = os.getenv('RESEARCH_LAB_URL', '').strip()
-    research_lab_token: str = os.getenv('RESEARCH_LAB_TOKEN', '').strip()
+    research_lab_url: str = field(default_factory=lambda: os.getenv('RESEARCH_LAB_URL', '').strip())
+    research_lab_token: str = field(default_factory=lambda: os.getenv('RESEARCH_LAB_TOKEN', '').strip())
 
-    ocr_lang: str = os.getenv('OCR_LANG', 'ita+eng')
-    chunk_chars: int = int(os.getenv('CHUNK_CHARS', '2200'))
-    chunk_overlap: int = int(os.getenv('CHUNK_OVERLAP', '300'))
-    top_k: int = int(os.getenv('TOP_K', '8'))
+    ocr_lang: str = field(default_factory=lambda: os.getenv('OCR_LANG', 'ita+eng'))
+    chunk_chars: int = field(default_factory=lambda: int(os.getenv('CHUNK_CHARS', '2200')))
+    chunk_overlap: int = field(default_factory=lambda: int(os.getenv('CHUNK_OVERLAP', '300')))
+    top_k: int = field(default_factory=lambda: int(os.getenv('TOP_K', '8')))
 
     def validate(self) -> None:
         if self.deploy_mode not in {'local', 'server'}:
