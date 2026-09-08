@@ -31,6 +31,11 @@ class Settings:
     api_token: str = os.getenv('API_TOKEN', '').strip()
     trust_proxy_headers: bool = _env_bool('TRUST_PROXY_HEADERS', False)
 
+    # Optional standalone Research Lab integration. Tutor does not own Lab data;
+    # it only calls the service through its HTTP API when configured.
+    research_lab_url: str = os.getenv('RESEARCH_LAB_URL', '').strip()
+    research_lab_token: str = os.getenv('RESEARCH_LAB_TOKEN', '').strip()
+
     ocr_lang: str = os.getenv('OCR_LANG', 'ita+eng')
     chunk_chars: int = int(os.getenv('CHUNK_CHARS', '2200'))
     chunk_overlap: int = int(os.getenv('CHUNK_OVERLAP', '300'))
