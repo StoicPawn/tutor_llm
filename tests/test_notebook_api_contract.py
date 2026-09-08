@@ -4,7 +4,10 @@ from studyforge.api import app
 
 class NotebookApiContractTests(unittest.TestCase):
     def test_notebook_routes_exist(self):
-        routes={(r.path,tuple(sorted(r.methods or []))) for r in app.routes}
+        routes={
+            (r.path,tuple(sorted(getattr(r,'methods',None) or [])))
+            for r in app.routes if hasattr(r,'path')
+        }
         paths={p for p,_ in routes}
         expected={
             '/workspaces/{workspace_id}/notebooks',
