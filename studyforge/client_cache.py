@@ -44,7 +44,13 @@ class ClientCacheStore:
         for r in rows:
             d=dict(r); d['payload']=json.loads(d.pop('payload_json')); d['deleted']=bool(d['deleted']); d['conflict']=json.loads(d.pop('conflict_json')) if d.get('conflict_json') else None; out.append(d)
         return out
-    def mark_pushed(self,workspace_id:int,obj:dict): self.upsert_remote(workspace_id,obj)
+    def mark_pushed(self,workspace_id:int,obj:dict):
+        # A successful push must overwrite the dirty local row with the canonical
+        # server revision. upsert_remote intentionally protects dirty rows during
+        # pull, so it cannot be reused here.
+        with self._con() as con:
+            con.execute('''INSERT INTO cache_objects(workspace_id,entity_type,client_uuid,server_id,revision,deleted,payload_json,dirty,conflict_json,updated_at) VALUES(?,?,?,?,?,?,?,?,NULL,?)
+            ON CONFLICT(workspace_id,entity_type,client_uuid) DO UPDATE SET server_id=excluded.server_id,revision=excluded.revision,deleted=excluded.deleted,payload_json=excluded.payload_json,dirty=0,conflict_json=NULL,updated_at=excluded.updated_at''',(workspace_id,obj['entity_type'],obj['client_uuid'],obj.get('server_id'),int(obj.get('revision',0)),1 if obj.get('deleted') else 0,json.dumps(obj.get('payload') or {},ensure_ascii=False),0,_now()))
     def mark_conflict(self,workspace_id:int,entity_type:str,client_uuid:str,conflict:dict):
         with self._con() as con: con.execute('UPDATE cache_objects SET conflict_json=?,updated_at=? WHERE workspace_id=? AND entity_type=? AND client_uuid=?',(json.dumps(conflict,ensure_ascii=False),_now(),workspace_id,entity_type,client_uuid))
     def objects(self,workspace_id:int,entity_type:str|None=None)->list[dict]:
