@@ -77,6 +77,34 @@ jobs:
           mkdir -p backups
           docker compose --env-file .env -f docker-compose.server.yml up -d --build --remove-orphans
 
+      - name: Stage grounded knowledge API for Expert's next safe restart
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          TUTOR_ENV: /home/stoicpawn/projects/tutor_llm/deploy/.env
+          EXPERT_ENV: /home/stoicpawn/projects/expert_my_rules/.env
+        run: |
+          set -euo pipefail
+          [ -f "$EXPERT_ENV" ] || exit 0
+          TOKEN="$(awk -F= '$1=="API_TOKEN" {print substr($0,index($0,"=")+1)}' "$TUTOR_ENV" | tail -n1)"
+          test -n "$TOKEN"
+
+          set_env() {
+            FILE="$1"
+            KEY="$2"
+            VALUE="$3"
+            if grep -q "^${KEY}=" "$FILE"; then
+              sed -i "s#^${KEY}=.*#${KEY}=${VALUE}#" "$FILE"
+            else
+              printf '\n%s=%s\n' "$KEY" "$VALUE" >> "$FILE"
+            fi
+          }
+
+          set_env "$EXPERT_ENV" TUTOR_LLM_URL http://tutor:8000
+          set_env "$EXPERT_ENV" TUTOR_LLM_TOKEN "$TOKEN"
+          echo "Tutor grounded-retrieval credentials staged for Expert My Rules."
+          echo "Expert is deliberately not restarted here; its own safe-checkpoint deploy policy will apply them."
+
       - name: Health check
         if: github.event_name == 'workflow_run'
         shell: bash

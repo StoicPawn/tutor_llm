@@ -16,6 +16,7 @@ class ApiContractTests(unittest.TestCase):
             '/flashcards/generate',
             '/workspaces/{workspace_id}/review-queue',
             '/workspaces/{workspace_id}/next-activity',
+            '/workspaces/{workspace_id}/retrieve',
             '/workspaces/{workspace_id}/documents/{document_id}/pages/{page}',
             '/workspaces/{workspace_id}/documents/{document_id}/source',
             '/exercises/sessions/{session_id}/answer',

@@ -11,6 +11,7 @@ from .pipeline import ingest_file
 from .teacher import answer_question, build_lesson, summarize, deepen, build_exercises, build_reasoning
 from .assessment import grade_answer
 from .coverage import analyze_coverage
+from .retrieval import retrieve
 from .workspaces import create_workspace, list_workspaces, get_workspace, ensure_default_workspace
 from .sessions import start_session, update_session, get_session, end_session
 from .notes import create_note, list_notes, update_note, delete_note
@@ -18,13 +19,15 @@ from .knowledge import rebuild_graph, graph
 from .repetition import due_reviews, upcoming_reviews, record_review
 from .interactive import start_exercise_session, session_state as exercise_state, submit_answer
 
-app = FastAPI(title='Tutor LLM API', version='0.11.0')
+app = FastAPI(title='Tutor LLM API', version='0.12.0')
 app.middleware('http')(auth_middleware)
 
 class WorkspaceIn(BaseModel):
     name: str; description: str = ''; goal: str = ''
 class TutorRequest(BaseModel):
     workspace_id: int; topic: str; document_ids: list[int] | None = None; epistemic_mode: str = 'Grounded'; lesson_mode: str = 'Approfondita'
+class RetrievalIn(BaseModel):
+    query: str; document_ids: list[int] | None = None; top_k: int = 8
 class CoverageIn(BaseModel): workspace_id: int; goal: str; document_ids: list[int] | None = None
 class AssessmentIn(BaseModel): workspace_id: int; topic: str; question: str; answer: str; document_ids: list[int] | None = None
 class GraphIn(BaseModel): workspace_id: int; document_ids: list[int] | None = None; max_nodes: int = 40
@@ -41,7 +44,7 @@ class NotePatch(BaseModel): workspace_id: int; title: str | None = None; content
 def startup(): validate_server_security(); ensure_default_workspace()
 @app.get('/health')
 def health():
-    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.11.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
+    backend_ok=inference_health(); return {'ok':backend_ok,'service':'tutor-llm','api_version':'0.12.0','deploy_mode':settings.deploy_mode,'inference_provider':settings.inference_provider,'chat_model':settings.chat_model,'embedding_model':settings.embedding_model,'inference_ready':backend_ok,'auth_required':settings.deploy_mode=='server'}
 @app.get('/workspaces')
 def workspaces(): return [dict(r) for r in list_workspaces()]
 @app.post('/workspaces')
@@ -70,6 +73,15 @@ def document_page(workspace_id:int,document_id:int,page:int):
     data=get_document_page(workspace_id,document_id,page)
     if not data: raise HTTPException(status_code=404,detail='Pagina non trovata o fuori workspace.')
     return data
+@app.post('/workspaces/{workspace_id}/retrieve')
+def grounded_retrieve(workspace_id:int,payload:RetrievalIn):
+    query=payload.query.strip()
+    if not query: raise HTTPException(status_code=400,detail='query must be non-empty')
+    top_k=max(1,min(int(payload.top_k),20))
+    try:
+        chunks=retrieve(workspace_id,query,payload.document_ids,top_k)
+        return {'workspace_id':workspace_id,'query':query,'count':len(chunks),'chunks':chunks}
+    except Exception as exc: raise HTTPException(status_code=400,detail=str(exc))
 @app.post('/workspaces/coverage')
 def coverage(payload:CoverageIn):
     try: return analyze_coverage(payload.workspace_id,payload.goal,payload.document_ids)
