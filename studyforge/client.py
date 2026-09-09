@@ -64,6 +64,17 @@ class TutorClient:
     def workspaces(self) -> list[dict]:
         return self._request('GET', '/workspaces')
 
+    def documents(self, workspace_id: int) -> list[dict]:
+        return self._request('GET', f'/workspaces/{workspace_id}/documents')
+
+    def retrieve(self, workspace_id: int, query: str, document_ids: list[int] | None = None,
+                 top_k: int = 8) -> dict:
+        return self._request('POST', f'/workspaces/{workspace_id}/retrieve', json={
+            'query': query,
+            'document_ids': document_ids,
+            'top_k': int(top_k),
+        })
+
     def ask(self, workspace_id: int, question: str, document_ids: list[int] | None = None,
             epistemic_mode: str = 'Tutor') -> dict:
         return self._request('POST', '/tutor/ask', json={
